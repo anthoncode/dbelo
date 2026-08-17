@@ -1,0 +1,122 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;500;600;700;800&family=Playfair+Display:ital,wght@1,700&display=swap');
+@import 'tailwindcss';
+@import '../../vendor/livewire/flux/dist/flux.css';
+
+@source '../views';
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../vendor/livewire/flux-pro/stubs/**/*.blade.php';
+@source '../../vendor/livewire/flux/stubs/**/*.blade.php';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ============================================================
+   dbelo — DESIGN TOKENS
+   Three colours. Everything else derives from them with opacity.
+   Never write a hex value in a Blade file.
+   ============================================================ */
+
+@theme {
+
+    /* --- Type --- */
+    --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+    --font-display: 'Playfair Display', Georgia, serif;
+
+    /* --- The three brand colours --- */
+    --color-paper: #f5f4fa;     /* light background, text on dark surfaces */
+    --color-ink: #1f1d33;       /* dark cards, dark background, text */
+    --color-brand: #a32eb7;     /* logo, action, playhead, PRO */
+
+    /* --- Surfaces (derived, not new colours) --- */
+    --color-surface: #ffffff;        /* light card */
+    --color-surface-dark: #282540;   /* card in dark mode */
+
+    /* --- Elevation: depth is shadow, never a border ---
+       Tinted with ink, never pure black. The negative spread pulls
+       the shadow inward so it stays soft without spilling sideways. */
+    --shadow-soft-sm: 0 2px 8px -2px rgb(31 29 51 / 0.10);
+    --shadow-soft-md: 0 10px 28px -10px rgb(31 29 51 / 0.20);
+    --shadow-soft-lg: 0 24px 60px -22px rgb(31 29 51 / 0.30);
+    --shadow-float: 0 6px 20px -6px rgb(31 29 51 / 0.18);
+    --shadow-brand: 0 8px 22px -8px rgb(163 46 183 / 0.65);
+    --shadow-brand-lg: 0 14px 32px -10px rgb(163 46 183 / 0.85);
+
+    /* Dark mode needs darker shadows: a light one is invisible there. */
+    --shadow-night-sm: 0 2px 8px -2px rgb(0 0 0 / 0.40);
+    --shadow-night-md: 0 10px 28px -10px rgb(0 0 0 / 0.55);
+    --shadow-night-lg: 0 24px 60px -22px rgb(0 0 0 / 0.65);
+
+    /* --- Shape: generous radii are part of the identity --- */
+    --radius-control: 16px;
+    --radius-card: 26px;
+    --radius-panel: 32px;
+
+    /* --- Motion: one curve for the whole site --- */
+    --ease-dbelo: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+    /* --- Flux integration --- */
+    --color-accent: var(--color-brand);
+    --color-accent-content: var(--color-brand);
+    --color-accent-foreground: #ffffff;
+}
+
+@layer theme {
+    .dark {
+        --color-accent: var(--color-brand);
+        --color-accent-content: var(--color-brand);
+        --color-accent-foreground: #ffffff;
+    }
+}
+
+@layer base {
+    body {
+        @apply bg-paper text-ink dark:bg-ink dark:text-paper;
+        font-weight: 300;
+        -webkit-font-smoothing: antialiased;
+    }
+
+    h1, h2, h3 {
+        letter-spacing: -0.025em;
+        line-height: 1.14;
+    }
+}
+
+/* Alpine: avoid a flash of both play and pause icons before boot. */
+[x-cloak] { display: none !important; }
+
+/* Playfair keyword accent — landing pages only, one or two words. */
+.key {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 700;
+    color: var(--color-brand);
+}
+
+/* Micro label: every piece of metadata in the UI uses this. */
+.micro {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    @apply text-ink/45 dark:text-paper/45;
+}
+
+[data-flux-field]:not(ui-radio, ui-checkbox) {
+    @apply grid gap-2;
+}
+
+[data-flux-label] {
+    @apply !mb-0 !leading-tight;
+}
+
+input:focus[data-flux-control],
+textarea:focus[data-flux-control],
+select:focus[data-flux-control] {
+    @apply outline-hidden ring-2 ring-accent ring-offset-2 ring-offset-accent-foreground;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation: none !important;
+        transition-duration: 0.01ms !important;
+    }
+}
