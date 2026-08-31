@@ -10,13 +10,31 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Laravel\Scout\Searchable;
 
 class Sound extends Model
 {
-    use HasFactory, SoftDeletes;
+    use HasFactory, Searchable, SoftDeletes;
 
     protected $guarded = [];
+
+    public const STATUS_DRAFT = 'draft';
+
+    public const STATUS_PENDING = 'pending';
+
+    public const STATUS_PUBLISHED = 'published';
+
+    public const STATUS_REJECTED = 'rejected';
+
+    /**
+     * Under a copyright claim. Not the same as rejected: rejected means it
+     * never made it in, claimed means it was live and is being disputed.
+     * The page stays up with a notice so the URL keeps its place while the
+     * claim is investigated; nothing plays and nothing downloads.
+     */
+    public const STATUS_CLAIMED = 'claimed';
 
     protected function casts(): array
     {
@@ -39,6 +57,19 @@ class Sound extends Model
     {
         static::creating(function (Sound $sound) {
             $sound->uuid ??= (string) Str::uuid();
+        });
+
+        // A soft delete keeps the files: the sound can come back.
+        // A force delete must clear them, otherwise 60 MB masters pile up
+        // on disk forever with nothing pointing at them.
+        static::deleting(function (Sound $sound) {
+            if (! $sound->isForceDeleting()) {
+                return;
+            }
+
+            foreach ($sound->files as $file) {
+                Storage::disk($file->disk)->delete($file->path);
+            }
         });
     }
 
@@ -81,9 +112,24 @@ class Sound extends Model
         return $this->hasMany(Download::class);
     }
 
+    public function claims(): HasMany
+    {
+        return $this->hasMany(Claim::class);
+    }
+
     public function musicAttribute(): HasOne
     {
         return $this->hasOne(MusicAttribute::class);
+    }
+
+    public function collections(): BelongsToMany
+    {
+        return $this->belongsToMany(Collection::class);
+    }
+
+    public function favouritedBy(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'favorites')->withPivot('created_at');
     }
 
     // ---------------------------------------------------------------
@@ -109,6 +155,11 @@ class Sound extends Model
     public function scopeFree(Builder $query): Builder
     {
         return $query->where('is_premium', false);
+    }
+
+    public function scopeUnderClaim(Builder $query): Builder
+    {
+        return $query->where('status', self::STATUS_CLAIMED);
     }
 
     // ---------------------------------------------------------------
@@ -143,6 +194,75 @@ class Sound extends Model
 
     public function isPublished(): bool
     {
+        return $this->status === self::STATUS_PUBLISHED && $this->published_at !== null;
+    }
+
+    public function isUnderClaim(): bool
+    {
+        return $this->status === self::STATUS_CLAIMED;
+    }
+
+    /**
+     * Did the contributor say this was not their own recording?
+     *
+     * The Contributor Agreement §4 requires declaring third-party material.
+     * When a claim arrives, this is the first thing worth looking at.
+     */
+    public function isThirdParty(): bool
+    {
+        return $this->source !== 'original';
+    }
+
+    // ---------------------------------------------------------------
+    // Search index (Meilisearch via Scout)
+    // ---------------------------------------------------------------
+
+    /**
+     * What Meilisearch stores. Flattened on purpose: the engine cannot
+     * traverse relationships, so the category name and the tags are copied
+     * in as plain values.
+     */
+    public function toSearchableArray(): array
+    {
+        $this->loadMissing(['category.parent', 'tags', 'license']);
+
+        return [
+            'id' => (int) $this->id,
+            'title' => $this->title,
+            'slug' => $this->slug,
+            'description' => (string) $this->description,
+
+            'category' => $this->category?->name,
+            'category_slug' => $this->category?->slug,
+            // Filtering by a parent category has to match its children too,
+            // so the parent slug travels with every sound.
+            'parent_category_slug' => $this->category?->parent?->slug ?? $this->category?->slug,
+
+            'license_slug' => $this->license?->slug,
+            'tags' => $this->tags->pluck('name')->all(),
+
+            'type' => $this->type,
+            'duration_ms' => (int) $this->duration_ms,
+            'is_premium' => (bool) $this->is_premium,
+            'is_loopable' => (bool) $this->is_loopable,
+
+            'downloads_count' => (int) $this->downloads_count,
+            'published_at' => $this->published_at?->getTimestamp() ?? 0,
+        ];
+    }
+
+    /**
+     * Drafts, sounds in review and rejected ones never reach the index.
+     * Scout calls this on every save, so unpublishing removes the document
+     * automatically.
+     */
+    public function shouldBeSearchable(): bool
+    {
         return $this->status === 'published' && $this->published_at !== null;
+    }
+
+    public function searchableAs(): string
+    {
+        return 'sounds';
     }
 }

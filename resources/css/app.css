@@ -30,6 +30,30 @@
     --color-surface: #ffffff;        /* light card */
     --color-surface-dark: #282540;   /* card in dark mode */
 
+    /* --- Semantic colours ---
+       Meaning, not decoration. Never two of these competing in one view.
+         danger   destructive actions and critical states
+         warning  reversible problems that need attention
+         success  confirmations and healthy states
+         info     neutral notices
+         action   the primary button across the product
+       The brand purple stays identity: logo, playhead, active states. */
+    --color-danger: #f90f3b;
+    --color-warning: #ffa314;
+    --color-success: #89d206;
+    --color-info: #03a3e1;
+    --color-action: #f9510f;
+
+    /* --- Admin panel ---
+       Darker steps derived from ink. The panel is always dark: it is a
+       workspace, not a reading surface, and the contrast keeps the audio
+       waveforms and the purple accent readable for hours. */
+    --color-rail: #121026;      /* icon rail, the deepest layer */
+    --color-canvas: #17152e;    /* page background */
+    --color-panel: #1f1d33;     /* nav panel — this is ink itself */
+    --color-raised: #272444;    /* cards and hover */
+    --color-hairline: #322e52;  /* 1px separators */
+
     /* --- Elevation: depth is shadow, never a border ---
        Tinted with ink, never pure black. The negative spread pulls
        the shadow inward so it stays soft without spilling sideways. */
@@ -91,6 +115,21 @@
     color: var(--color-brand);
 }
 
+/*
+ * Same display face as .key, without the colour.
+ *
+ * Use this inside anything that repaints on hover — a tile that fills with
+ * brand, a dark panel. .key pins the brand orange, so an accented word sat
+ * on a brand background disappears the instant the card fills. Here the
+ * word inherits whatever the heading is currently doing, which is what a
+ * typographic accent should do in the first place.
+ */
+.key-plain {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 700;
+}
+
 /* Micro label: every piece of metadata in the UI uses this. */
 .micro {
     font-size: 10px;
@@ -113,6 +152,78 @@ textarea:focus[data-flux-control],
 select:focus[data-flux-control] {
     @apply outline-hidden ring-2 ring-accent ring-offset-2 ring-offset-accent-foreground;
 }
+
+/* ============================================================
+   Ambient waveform — the landing hero
+   ============================================================
+
+   Pure CSS, and deliberately so. The bars are not reacting to anything;
+   they breathe on their own at slightly different speeds, which is what
+   stops a row of identical bars from reading as a loading spinner.
+
+   Each bar carries its own --dur and animation-delay inline, because both
+   are per-element values that Tailwind could not generate at build time.
+   transform: scaleY is the only property animated — it runs on the
+   compositor, so a hundred bars cost nothing.
+
+   The reduced-motion block below turns all of this off, which is why it
+   has to stay last in the file.
+   ============================================================ */
+@keyframes dbelo-breathe {
+    0%, 100% { transform: scaleY(0.22); }
+    50%      { transform: scaleY(1); }
+}
+
+.wave-ambient span {
+    transform-origin: center;
+    animation: dbelo-breathe var(--dur, 3s) var(--ease-dbelo) infinite;
+}
+
+/* ============================================================
+   Entrance — landing panels and headings
+   ============================================================
+
+   CSS animation rather than a scroll observer, and that is a deliberate
+   trade. An IntersectionObserver reveal looks better below the fold, but it
+   depends on a plugin and on JavaScript having booted; this runs on the
+   first frame and cannot fail. Below the fold it simply means the animation
+   already happened by the time you scroll there, which nobody notices.
+
+   Per-element `animation-delay` inline makes the stagger — a value Tailwind
+   could not generate at build time.
+   ============================================================ */
+@keyframes dbelo-rise {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: none; }
+}
+
+.rise {
+    animation: dbelo-rise 0.6s var(--ease-dbelo) both;
+}
+
+/* Theme switch: a wash of colour that expands out of the button and is
+   gone. Written as a keyframe rather than a class-toggled transition
+   because a transition back to the resting state is visible — the element
+   would shrink and brighten again on the way out. An animation ends where
+   it ends. */
+@keyframes dbelo-nightfall {
+    from { transform: scale(0.35); opacity: 0.9; }
+    to   { transform: scale(2.4);  opacity: 0; }
+}
+
+.nightfall {
+    animation: dbelo-nightfall 0.7s var(--ease-dbelo) both;
+    background: radial-gradient(circle, var(--nightfall-tint) 0%, transparent 72%);
+}
+
+/* Sky colours, not product colours. The semantic five (danger, warning,
+   success, info, action) each carry a meaning, and a decorative wash that
+   borrows one of them starts teaching the wrong thing — an amber flash is
+   supposed to mean "look at this, it needs attention", not "it is daytime".
+   These two live here and are used nowhere else. */
+.nightfall-day   { --nightfall-tint: rgb(253 200 88 / 0.75); }
+.nightfall-night { --nightfall-tint: rgb(92 82 210 / 0.75); }
+.nightfall-auto  { --nightfall-tint: rgb(148 163 184 / 0.60); }
 
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {

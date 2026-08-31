@@ -7,6 +7,7 @@ use App\Models\License;
 use App\Models\Sound;
 use App\Models\SoundFile;
 use App\Models\User;
+use App\Support\FilenameMeta;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -31,8 +32,15 @@ class SoundImporter
     ): Sound {
         $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
 
+        // FilenameMeta rather than a bare headline(): it also strips take
+        // numbers and understands the UCS convention, where the readable
+        // name is the second underscore segment and not the whole string.
         $title = $attributes['title']
-            ?? Str::headline(pathinfo($originalName, PATHINFO_FILENAME));
+            ?? FilenameMeta::parse($originalName)['title'];
+
+        // 'checksum' and 'title' are instructions to this method, not
+        // columns on sounds. Anything else in $attributes is passed through.
+        $columns = array_diff_key($attributes, array_flip(['checksum']));
 
         $sound = Sound::create(array_merge([
             'user_id' => $user->id,
@@ -43,24 +51,36 @@ class SoundImporter
             'slug' => $this->uniqueSlug($title),
             'status' => 'draft',
             'source' => 'original',
-        ], $attributes));
+        ], $columns));
 
         // Stored under the UUID so two uploads named "rain.wav" can never
         // overwrite each other.
         $storedPath = "originals/{$sound->uuid}.{$extension}";
+        $disk = config('dbelo.storage.master');
 
-        Storage::disk('sounds_private')->put(
-            $storedPath,
-            file_get_contents($sourcePath)
-        );
+        // Streamed, not read into a string. file_get_contents() on a 200 MB
+        // master needs 200 MB of PHP memory, and a bulk import doing that
+        // fifty times in one request is how you meet memory_limit.
+        $stream = fopen($sourcePath, 'rb');
+
+        try {
+            Storage::disk($disk)->put($storedPath, $stream);
+        } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+        }
 
         SoundFile::create([
             'sound_id' => $sound->id,
             'purpose' => 'original',
             'format' => $extension,
-            'disk' => 'sounds_private',
+            'disk' => $disk,
             'path' => $storedPath,
             'size_bytes' => filesize($sourcePath),
+            // Reads the file a second time, but hash_file streams it, and
+            // this is what makes "have we already got this?" answerable.
+            'checksum' => $attributes['checksum'] ?? hash_file('sha256', $sourcePath),
         ]);
 
         return $sound;

@@ -59,6 +59,46 @@ return [
             'report' => false,
         ],
 
+        /*
+        | Cloudflare R2. Speaks the S3 protocol, so it uses the same driver
+        | with a custom endpoint. Chosen over S3 because R2 does not charge
+        | for egress, and serving audio is almost entirely egress.
+        */
+        'r2' => [
+            'driver' => 's3',
+            'key' => env('R2_ACCESS_KEY_ID'),
+            'secret' => env('R2_SECRET_ACCESS_KEY'),
+            'region' => 'auto',
+            'bucket' => env('R2_BUCKET'),
+            'endpoint' => env('R2_ENDPOINT'),
+            'url' => env('R2_PUBLIC_URL'),
+            'use_path_style_endpoint' => true,
+            'throw' => false,
+            'report' => false,
+        ],
+
+        /*
+        | Backblaze B2. Also S3-compatible — same driver, different endpoint.
+        |
+        | Cheaper per stored GB than R2, and egress is free up to three times
+        | what you store, then unlimited through Cloudflare. It is here so the
+        | choice between the two stays a change of environment variables
+        | rather than a change of code: the point of this file is that the
+        | application talks to ONE protocol and the provider is a detail.
+        */
+        'b2' => [
+            'driver' => 's3',
+            'key' => env('B2_ACCESS_KEY_ID'),
+            'secret' => env('B2_SECRET_ACCESS_KEY'),
+            'region' => env('B2_REGION', 'us-west-004'),
+            'bucket' => env('B2_BUCKET'),
+            'endpoint' => env('B2_ENDPOINT'),
+            'url' => env('B2_PUBLIC_URL'),
+            'use_path_style_endpoint' => true,
+            'throw' => false,
+            'report' => false,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),

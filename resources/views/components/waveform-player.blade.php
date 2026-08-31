@@ -3,6 +3,8 @@
     'bars' => 90,
     'height' => 'h-8',
     'thickness' => 'w-[2px]',
+    'button' => 'size-10',
+    'showTime' => true,
 ])
 
 @php
@@ -11,8 +13,9 @@
     $preview = $sound->files->firstWhere('purpose', 'preview');
     $src = $preview ? Storage::disk($preview->disk)->url($preview->path) : null;
 
-    // Stored with ~400 peaks. Lists need fewer bars, so peaks are
-    // averaged down to the requested resolution.
+    // Stored with ~400 peaks. Lists need fewer bars, so peaks are averaged
+    // down — averaged, not sampled, so a single sharp transient cannot fall
+    // between two picks and disappear.
     $peaks = $sound->waveform ?? [];
 
     if ($peaks && count($peaks) > $bars) {
@@ -24,84 +27,71 @@
 
     // A 7% floor keeps silence visible instead of collapsing to nothing.
     $heights = array_map(fn ($p) => max(7, (int) round($p * 100)), $peaks);
+
+    /*
+     * Everything the bar at the bottom of the page needs to play this.
+     *
+     * Passed as data rather than looked up, because by the time the visitor
+     * has navigated twice the row that started the track is long gone from
+     * the DOM and the bar still has to render its title.
+     */
+    $track = [
+        'id' => $sound->id,
+        'src' => $src,
+        'title' => $sound->title,
+        'author' => $sound->user?->name,
+        'url' => route('sounds.show', $sound),
+        'duration' => round($sound->duration_ms / 1000, 3),
+    ];
 @endphp
 
-<div
-    x-data="{
-        playing: false,
-        progress: 0,
-        current: 0,
-        duration: {{ $sound->duration_ms / 1000 }},
-        audio: null,
+<div x-data="dbeloTrack({{ Js::from($track) }})"
+     {{ $attributes->merge(['class' => 'flex items-center gap-4']) }}>
 
-        init() {
-            this.audio = this.$refs.audio;
+    {{--
+        The play control.
 
-            this.audio.addEventListener('timeupdate', () => {
-                this.current = this.audio.currentTime;
-                this.progress = this.audio.duration ? this.audio.currentTime / this.audio.duration : 0;
-            });
+        `relative` with both icons absolutely placed, rather than two grid
+        children: as grid items they occupied two separate rows, so the
+        glyph was never actually in the middle of the circle and at 0.7rem
+        inside a 40px button there was little enough of it that the button
+        read as empty. One cell, one centred glyph, sized to the button.
 
-            this.audio.addEventListener('ended', () => {
-                this.playing = false;
-                this.progress = 0;
-                this.current = 0;
-            });
+        Two icons swapped rather than one name computed, and the pause icon
+        carries style="display:none" rather than x-cloak. x-cloak is removed
+        by Alpine on init and never restored, so after a Livewire re-render
+        morphs this row the pause glyph would sit on top of the play glyph
+        with nothing left to hide it.
+    --}}
+    <button type="button"
+            x-on:click="toggle()"
+            @disabled(! $src)
+            :aria-label="playing ? 'Pause' : 'Play'"
+            @class([
+                $button,
+                'relative grid shrink-0 place-items-center rounded-full text-white shadow-brand transition duration-300 ease-dbelo hover:scale-105',
+                'bg-brand' => $src,
+                // No preview file: say so, instead of a dead orange circle.
+                'cursor-not-allowed bg-ink/20 shadow-none dark:bg-paper/20' => ! $src,
+            ])
+            @if (! $src) title="No preview available yet" @endif>
 
-            // Only one sound plays at a time across the page.
-            window.addEventListener('dbelo-play', (e) => {
-                if (e.detail !== this.$el && this.playing) {
-                    this.audio.pause();
-                    this.playing = false;
-                }
-            });
-        },
+        <span x-show="! playing" class="absolute inset-0 grid place-items-center">
+            <x-icon name="play" style="solid" class="translate-x-[1px] text-[0.95rem] leading-none" />
+        </span>
 
-        toggle() {
-            if (this.playing) {
-                this.audio.pause();
-                this.playing = false;
-                return;
-            }
-
-            window.dispatchEvent(new CustomEvent('dbelo-play', { detail: this.$el }));
-            this.audio.play();
-            this.playing = true;
-        },
-
-        seek(event) {
-            const rect = event.currentTarget.getBoundingClientRect();
-            const ratio = (event.clientX - rect.left) / rect.width;
-            if (this.audio.duration) this.audio.currentTime = ratio * this.audio.duration;
-        },
-
-        format(seconds) {
-            if (! seconds || isNaN(seconds)) return '0:00';
-            const m = Math.floor(seconds / 60);
-            const s = Math.floor(seconds % 60).toString().padStart(2, '0');
-            return `${m}:${s}`;
-        },
-    }"
-    {{ $attributes->merge(['class' => 'flex items-center gap-4']) }}
->
-    <audio x-ref="audio" src="{{ $src }}" preload="none"></audio>
-
-    <button
-        type="button"
-        @click="toggle()"
-        class="grid size-10 shrink-0 place-items-center rounded-full bg-brand text-white shadow-brand transition duration-300 ease-dbelo hover:scale-108"
-        :aria-label="playing ? 'Pause' : 'Play'"
-    >
-        <svg x-show="! playing" class="size-3.5 translate-x-px" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M8 5v14l11-7z"/>
-        </svg>
-        <svg x-show="playing" x-cloak class="size-3.5" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M6 4h4v16H6zM14 4h4v16h-4z"/>
-        </svg>
+        <span x-show="playing" style="display: none" class="absolute inset-0 grid place-items-center">
+            <x-icon name="pause" style="solid" class="text-[0.95rem] leading-none" />
+        </span>
     </button>
 
     @if ($heights)
-        <div @click="seek($event)" class="relative flex-1 cursor-pointer {{ $height }}">
+        <div x-on:click="seek($event)"
+             class="relative flex-1 cursor-pointer {{ $height }}"
+             role="slider"
+             aria-label="Seek"
+             :aria-valuenow="Math.round(progress * 100)"
+             aria-valuemin="0" aria-valuemax="100">
 
             {{-- Unplayed bars: currentColor, so they adapt to light or dark cards --}}
             <div class="absolute inset-0 flex items-center justify-between">
@@ -110,8 +100,9 @@
                 @endforeach
             </div>
 
-            {{-- Played bars revealed by clipping: one style write per frame
-                 instead of one per bar --}}
+            {{-- Played bars revealed by clipping: ONE style write per frame
+                 rather than one per bar. With 120 bars at 4 updates a second
+                 that is the difference between 480 style writes and 4. --}}
             <div class="absolute inset-0 flex items-center justify-between"
                  :style="`clip-path: inset(0 ${100 - progress * 100}% 0 0)`">
                 @foreach ($heights as $h)
@@ -123,7 +114,7 @@
         <div class="flex-1 text-sm opacity-40">No waveform</div>
     @endif
 
-    <div class="micro w-24 shrink-0 text-right tabular-nums">
-        <span x-text="format(current)">0:00</span> / <span x-text="format(duration)"></span>
-    </div>
+    @if ($showTime)
+        <div class="micro w-9 shrink-0 text-right tabular-nums">{{ $sound->durationForHumans() }}</div>
+    @endif
 </div>

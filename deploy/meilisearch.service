@@ -1,0 +1,26 @@
+# systemd: Meilisearch as a service.
+# Copy to /etc/systemd/system/meilisearch.service
+#
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now meilisearch
+
+[Unit]
+Description=Meilisearch
+After=network.target
+
+[Service]
+Type=simple
+User=meilisearch
+Group=meilisearch
+WorkingDirectory=/var/lib/meilisearch
+ExecStart=/usr/local/bin/meilisearch \
+  --db-path /var/lib/meilisearch/data.ms \
+  --env production \
+  --http-addr 127.0.0.1:7700 \
+  --master-key ${MEILI_MASTER_KEY}
+EnvironmentFile=/etc/meilisearch.env
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

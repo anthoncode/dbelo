@@ -19,6 +19,13 @@ class DownloadController extends Controller
 {
     public function __invoke(Request $request, Sound $sound): StreamedResponse
     {
+        // 451 Unavailable For Legal Reasons: the file exists and the person
+        // is allowed to ask for it — we are the ones who cannot hand it over
+        // while a copyright claim is open.
+        if ($sound->isUnderClaim()) {
+            abort(451, 'This sound is temporarily unavailable while a copyright claim is reviewed.');
+        }
+
         abort_unless($sound->isPublished(), 404);
 
         $user = $request->user();
@@ -51,6 +58,10 @@ class DownloadController extends Controller
         ]);
 
         $sound->increment('downloads_count');
+
+        // If a search led here, credit it. This is what turns the search log
+        // from a list of words into a measure of whether search works.
+        app(\App\Services\SearchLogger::class)->attributeDownload();
 
         return Storage::disk($file->disk)->download(
             $file->path,

@@ -73,7 +73,17 @@ return [
     |
     */
 
-    'home' => '/dashboard',
+    /*
+     * Everyone's safe landing place.
+     *
+     * This value is not only the post-login target: Fortify's
+     * RedirectIfAuthenticated sends an already-signed-in visitor here when
+     * they hit /login, and email verification finishes here too. So it has
+     * to be a page EVERY signed-in user is allowed to open — which is why it
+     * is not '/admin'. Staff get sent to the panel by the LoginResponse
+     * binding in FortifyServiceProvider, which can see who is logging in.
+     */
+    'home' => '/library',
 
     /*
     |--------------------------------------------------------------------------
@@ -116,12 +126,8 @@ return [
 
     'limiters' => [
         'login' => 'login',
-        /* @chisel-2fa */
         'two-factor' => 'two-factor',
-        /* @end-chisel-2fa */
-        /* @chisel-passkeys */
         'passkeys' => 'passkeys',
-        /* @end-chisel-passkeys */
     ],
 
     /*
@@ -137,7 +143,6 @@ return [
 
     'views' => true,
 
-    /* @chisel-passkeys */
     /*
     |--------------------------------------------------------------------------
     | Passkeys
@@ -153,7 +158,6 @@ return [
         'user_handle_secret' => env('PASSKEYS_USER_HANDLE_SECRET', config('app.key')),
         'timeout' => 60000,
     ],
-    /* @end-chisel-passkeys */
 
     /*
     |--------------------------------------------------------------------------
@@ -167,25 +171,17 @@ return [
     */
 
     'features' => [
-        /* @chisel-registration */
         Features::registration(),
-        /* @end-chisel-registration */
         Features::resetPasswords(),
-        /* @chisel-email-verification */
         Features::emailVerification(),
-        /* @end-chisel-email-verification */
-        /* @chisel-2fa */
         Features::twoFactorAuthentication([
             'confirm' => true,
             'confirmPassword' => true,
             // 'window' => 0
         ]),
-        /* @end-chisel-2fa */
-        /* @chisel-passkeys */
         Features::passkeys([
             'confirmPassword' => true,
         ]),
-        /* @end-chisel-passkeys */
     ],
 
 ];

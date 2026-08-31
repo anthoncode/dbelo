@@ -10,13 +10,16 @@
     "license": "MIT",
     "require": {
         "php": "^8.3",
+        "http-interop/http-factory-guzzle": "^1.2",
         "laravel/chisel": "^0.1.0",
         "laravel/fortify": "^1.37.2",
         "laravel/framework": "^13.17",
+        "laravel/scout": "^11.5",
         "laravel/tinker": "^3.0",
         "livewire/blaze": "^1.0",
         "livewire/flux": "^2.13.1",
-        "livewire/livewire": "^4.1"
+        "livewire/livewire": "^4.1",
+        "meilisearch/meilisearch-php": "^1.17"
     },
     "require-dev": {
         "fakerphp/faker": "^1.24",
@@ -78,7 +81,6 @@
             "@php artisan package:discover --ansi"
         ],
         "post-update-cmd": [
-            "@php artisan install:features --ansi",
             "@php artisan vendor:publish --tag=laravel-assets --ansi --force"
         ],
         "post-root-package-install": [
@@ -98,7 +100,6 @@
             "dont-discover": [],
             "installer": {
                 "post-create-project": [
-                    "@php artisan install:features --ansi"
                 ]
             }
         }

@@ -23,7 +23,11 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * @property string|null $username
  * @property string $email
  * @property string $role
+ * @property string $status
  * @property Carbon|null $email_verified_at
+ * @property string|null $oauth_provider
+ * @property string|null $oauth_id
+ * @property Carbon|null $anonymised_at
  * @property string $password
  * @property string|null $avatar_path
  * @property string|null $bio
@@ -48,6 +52,10 @@ class User extends Authenticatable implements PasskeyUser
 
     public const ROLE_USER = 'user';
 
+    public const STATUS_ACTIVE = 'active';
+
+    public const STATUS_SUSPENDED = 'suspended';
+
     /**
      * Get the attributes that should be cast.
      *
@@ -58,6 +66,9 @@ class User extends Authenticatable implements PasskeyUser
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'suspended_at' => 'datetime',
+            'last_seen_at' => 'datetime',
+            'anonymised_at' => 'datetime',
         ];
     }
 
@@ -98,6 +109,64 @@ class User extends Authenticatable implements PasskeyUser
         return $this->hasMany(Subscription::class);
     }
 
+    public function collections(): HasMany
+    {
+        return $this->hasMany(Collection::class);
+    }
+
+    // ---------------------------------------------------------------
+    // Account status
+    // ---------------------------------------------------------------
+
+    public function isSuspended(): bool
+    {
+        return $this->status === self::STATUS_SUSPENDED;
+    }
+
+    /**
+     * Signing in with Google is itself proof of the address: Google would
+     * not hand over an account whose email it had not already confirmed.
+     */
+    public function isVerified(): bool
+    {
+        return $this->email_verified_at !== null || $this->oauth_provider !== null;
+    }
+
+    /**
+     * How this account proved it is real: 'google', 'email', or null when
+     * it never did. The admin needs the difference — an unverified email
+     * account is someone to chase, a Google account is nothing to chase.
+     */
+    public function verificationSource(): ?string
+    {
+        if ($this->oauth_provider) {
+            return $this->oauth_provider;
+        }
+
+        return $this->email_verified_at ? 'email' : null;
+    }
+
+    public function isAnonymised(): bool
+    {
+        return $this->anonymised_at !== null;
+    }
+
+    public function scopeActive($query)
+    {
+        return $query->where('status', self::STATUS_ACTIVE);
+    }
+
+    public function scopeSuspended($query)
+    {
+        return $query->where('status', self::STATUS_SUSPENDED);
+    }
+
+    /** Deleted accounts are still rows; almost no screen wants to see them. */
+    public function scopeReal($query)
+    {
+        return $query->whereNull('anonymised_at');
+    }
+
     // ---------------------------------------------------------------
     // Roles
     // ---------------------------------------------------------------
@@ -109,7 +178,8 @@ class User extends Authenticatable implements PasskeyUser
 
     public function canUpload(): bool
     {
-        return in_array($this->role, [self::ROLE_ADMIN, self::ROLE_COLLABORATOR], true);
+        return ! $this->isSuspended()
+            && in_array($this->role, [self::ROLE_ADMIN, self::ROLE_COLLABORATOR], true);
     }
 
     // ---------------------------------------------------------------
@@ -144,6 +214,10 @@ class User extends Authenticatable implements PasskeyUser
      */
     public function canDownload(?Sound $sound = null): bool
     {
+        if ($this->isSuspended()) {
+            return false;
+        }
+
         $plan = $this->currentPlan();
 
         if (! $plan) {

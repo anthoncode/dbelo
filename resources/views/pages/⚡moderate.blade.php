@@ -2,6 +2,8 @@
 
 use App\Models\Category;
 use App\Models\Sound;
+use App\Jobs\ProcessSoundUpload;
+use App\Notifications\SoundReviewed;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -42,6 +44,7 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
                 'title' => $sound->title,
                 'category_id' => (string) ($sound->category_id ?? ''),
                 'is_premium' => (bool) $sound->is_premium,
+                'is_featured' => (bool) $sound->is_featured,
             ];
         }
     }
@@ -52,9 +55,30 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
         return Category::orderBy('parent_id')->orderBy('sort_order')->get();
     }
 
+    public function retry(int $id): void
+    {
+        $sound = Sound::findOrFail($id);
+        $sound->update(['processing_error' => null, 'status' => 'draft']);
+
+        ProcessSoundUpload::dispatch($sound);
+
+        $this->refreshList("“{$sound->title}” is back in the queue.");
+    }
+
     #[Computed]
     public function sounds()
     {
+        // The failed tab is not a status: it is any sound carrying an error,
+        // whatever state it ended up in.
+        if ($this->tab === 'failed') {
+            return Sound::query()
+                ->whereNotNull('processing_error')
+                ->with(['files', 'category', 'user', 'tags'])
+                ->latest('created_at')
+                ->limit(40)
+                ->get();
+        }
+
         return Sound::query()
             ->where('status', $this->tab)
             ->with(['files', 'category', 'user', 'tags'])
@@ -66,11 +90,15 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
     #[Computed]
     public function counts(): array
     {
-        return Sound::query()
+        $counts = Sound::query()
             ->selectRaw('status, count(*) as total')
             ->groupBy('status')
             ->pluck('total', 'status')
             ->all();
+
+        $counts['failed'] = Sound::whereNotNull('processing_error')->count();
+
+        return $counts;
     }
 
     public function approve(int $id): void
@@ -96,12 +124,18 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
             'title' => $title,
             'category_id' => $draft['category_id'] ?: null,
             'is_premium' => (bool) ($draft['is_premium'] ?? false),
+            'is_featured' => (bool) ($draft['is_featured'] ?? false),
             'status' => 'published',
             'published_at' => $sound->published_at ?? now(),
             'reviewed_by' => auth()->id(),
             'reviewed_at' => now(),
             'rejection_reason' => null,
         ])->save();
+
+        // Only tell someone else's contributor: no point emailing yourself.
+        if ($sound->user_id !== auth()->id()) {
+            $sound->user->notify(new SoundReviewed($sound, 'published'));
+        }
 
         $this->refreshList("“{$sound->title}” is live.");
     }
@@ -129,12 +163,18 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
             'reason.min' => 'Give at least a short sentence.',
         ]);
 
-        Sound::findOrFail($id)->update([
+        $sound = Sound::with('user')->findOrFail($id);
+
+        $sound->update([
             'status' => 'rejected',
             'rejection_reason' => $this->reason,
             'reviewed_by' => auth()->id(),
             'reviewed_at' => now(),
         ]);
+
+        if ($sound->user_id !== auth()->id()) {
+            $sound->user->notify(new SoundReviewed($sound, 'rejected'));
+        }
 
         $this->rejecting = null;
         $this->reason = '';
@@ -194,6 +234,7 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
                 'published' => 'Live',
                 'rejected' => 'Rejected',
                 'processing' => 'Processing',
+                'failed' => 'Failed',
             ] as $key => $label)
                 <button wire:click="$set('tab', '{{ $key }}')"
                         class="flex items-center gap-2 rounded-full px-5 py-2.5 text-[0.85rem] shadow-soft-sm transition duration-300 ease-dbelo hover:-translate-y-0.5
@@ -232,9 +273,13 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
                     <x-waveform-player :sound="$sound" :bars="110" height="h-14" class="mb-6" />
 
                     @if ($sound->processing_error)
-                        <div class="mb-5 rounded-control bg-brand/10 px-4 py-3 text-sm text-brand">
-                            <x-icon name="triangle-exclamation" style="solid" class="mr-2" />
-                            {{ $sound->processing_error }}
+                        <div class="mb-5 flex flex-wrap items-center gap-3 rounded-control bg-brand/10 px-4 py-3 text-sm text-brand">
+                            <x-icon name="triangle-exclamation" style="solid" />
+                            <span class="min-w-0 flex-1">{{ $sound->processing_error }}</span>
+                            <button wire:click="retry({{ $sound->id }})"
+                                    class="shrink-0 rounded-full bg-brand px-4 py-2 text-[0.8rem] font-medium text-white transition hover:-translate-y-0.5">
+                                Retry
+                            </button>
                         </div>
                     @endif
 
@@ -275,7 +320,19 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
                             Premium
                         </button>
 
+                        <button wire:click="$toggle('drafts.{{ $sound->id }}.is_featured')"
+                                class="flex items-center gap-2 rounded-full px-4 py-2.5 text-[0.83rem] shadow-soft-sm transition duration-300 ease-dbelo hover:-translate-y-0.5
+                                       {{ ($drafts[$sound->id]['is_featured'] ?? false) ? 'bg-brand text-white' : 'bg-paper dark:bg-paper/10' }}">
+                            <x-icon name="star" :style="($drafts[$sound->id]['is_featured'] ?? false) ? 'solid' : 'regular'" class="text-xs" />
+                            Featured
+                        </button>
+
                         <div class="ml-auto flex flex-wrap gap-3">
+                            <a href="{{ route('sounds.edit', $sound) }}" wire:navigate
+                               class="flex items-center gap-2 rounded-full bg-paper px-5 py-2.5 text-[0.85rem] shadow-soft-sm transition hover:-translate-y-0.5 dark:bg-paper/10">
+                                <x-icon name="pen" style="solid" class="text-xs" /> Edit
+                            </a>
+
                             @if ($sound->status === 'published')
                                 <a href="{{ route('sounds.show', $sound) }}" target="_blank"
                                    class="flex items-center gap-2 rounded-full bg-paper px-5 py-2.5 text-[0.85rem] shadow-soft-sm transition hover:-translate-y-0.5 dark:bg-paper/10">

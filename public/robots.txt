@@ -1,2 +1,20 @@
 User-agent: *
-Disallow:
+Allow: /
+
+# Private areas: nothing to index and nothing a crawler should touch.
+Disallow: /upload
+Disallow: /moderate
+Disallow: /users
+Disallow: /settings
+Disallow: /dashboard
+Disallow: /login
+Disallow: /register
+
+# Filtered catalogue variants are thin duplicates of /sounds.
+Disallow: /*?q=
+Disallow: /*?duration=
+Disallow: /*?sort=
+Disallow: /*?freeOnly=
+Disallow: /*?loopsOnly=
+
+Sitemap: https://dbelo.com/sitemap.xml

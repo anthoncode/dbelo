@@ -28,6 +28,10 @@
         <env name="DB_URL" value=""/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
+        <!-- Tests must never talk to Meilisearch: no server in CI, and a
+             real index would leak state between runs. -->
+        <env name="SCOUT_DRIVER" value="null"/>
+        <env name="SCOUT_QUEUE" value="false"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>

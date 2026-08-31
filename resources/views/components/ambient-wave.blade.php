@@ -1,0 +1,46 @@
+@props([
+    'bars' => 64,
+    'height' => 'h-16',
+])
+
+@php
+    /*
+     * A waveform that is not data.
+     *
+     * The heights come from a sine curve rather than random(): random bars
+     * produce clumps and gaps that read as noise, while a curve reads as a
+     * shape — which is what a waveform is. Two sines of different periods
+     * added together keep it from looking mechanical.
+     *
+     * Seeded by index, so the same page renders the same shape on every
+     * request and the markup stays cacheable.
+     */
+    $shape = [];
+
+    for ($i = 0; $i < $bars; $i++) {
+        $t = $i / max(1, $bars - 1);
+
+        $envelope = sin($t * M_PI);                    // quiet at both ends
+        $detail = 0.55 + 0.45 * sin($t * M_PI * 9.0);  // the ripple along it
+
+        $shape[] = [
+            'height' => max(6, (int) round($envelope * $detail * 100)),
+            'duration' => round(2.4 + 1.9 * sin($t * M_PI * 3.7), 2),
+            'delay' => round($t * 2.2, 2),
+        ];
+    }
+@endphp
+
+{{--
+    Decorative only: aria-hidden, and no text alternative, because there is
+    nothing here a screen reader could usefully say.
+--}}
+<div {{ $attributes->merge(['class' => "wave-ambient pointer-events-none flex items-center justify-between gap-[2px] {$height}"]) }}
+     aria-hidden="true">
+    @foreach ($shape as $bar)
+        <span class="w-[3px] flex-1 rounded-full bg-brand/25"
+              style="height: {{ $bar['height'] }}%;
+                     --dur: {{ max(1.2, $bar['duration']) }}s;
+                     animation-delay: -{{ $bar['delay'] }}s;"></span>
+    @endforeach
+</div>
