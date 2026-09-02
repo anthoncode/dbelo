@@ -445,6 +445,13 @@ new #[Layout('layouts.site')] #[Title('Sound effects')] class extends Component 
             <div class="rounded-card bg-surface p-3 shadow-soft-md dark:bg-surface-dark">
                 @forelse ($this->sounds as $sound)
                     <x-sound-row :sound="$sound" wire:key="sound-{{ $sound->id }}" />
+
+                    {{-- After N results, never at the top: somebody has to
+                         see the catalogue before they see the advertising,
+                         or the site reads as the advertising. --}}
+                    @if ($loop->iteration === \App\Support\Ads::catalogAfter())
+                        <x-ad-slot name="catalog" />
+                    @endif
                 @empty
                     <div class="py-20 text-center">
                         <x-icon name="waveform-lines" style="regular" class="text-[26px] text-ink/15 dark:text-paper/15" />

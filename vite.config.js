@@ -2,7 +2,6 @@ import {
     defineConfig
 } from 'vite';
 import laravel from 'laravel-vite-plugin';
-import { bunny } from 'laravel-vite-plugin/fonts';
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
@@ -14,11 +13,28 @@ export default defineConfig({
                 'resources/js/passkeys.js',
             ],
             refresh: true,
-            fonts: [
-                bunny('Instrument Sans', {
-                    weights: [400, 500, 600],
-                }),
-            ],
+
+            /*
+             * No fonts declared here any more.
+             *
+             * It self-hosted Instrument Sans — a leftover from the Laravel
+             * starter kit — which nothing in this project ever used: the
+             * @theme block in resources/css/app.css sets --font-sans to
+             * Outfit and --font-display to Playfair Display, and both come
+             * from the @import at the top of that file. Every build was
+             * downloading and shipping about 120KB of woff2 that no element
+             * on the site was ever styled with.
+             *
+             * The `@fonts` directive that emitted its stylesheet came out of
+             * partials/head.blade.php in the same commit.
+             *
+             * WORTH DOING NEXT, and deliberately not done here: moving
+             * Outfit and Playfair off that Google Fonts @import and into
+             * this array through bunny(). It would drop a render-blocking
+             * third-party request and stop handing Google the IP address of
+             * every visitor — which matters more than usual on a site whose
+             * privacy policy is one of its own pages.
+             */
         }),
         tailwindcss(),
     ],

@@ -42,7 +42,7 @@ class AdminNav
                 'items' => [
                     ['label' => 'Sounds', 'icon' => 'music', 'route' => 'admin.sounds'],
                     ['label' => 'Bulk upload', 'icon' => 'layer-plus', 'route' => 'admin.bulk-upload'],
-                    ['label' => 'In review', 'icon' => 'clipboard-check', 'route' => 'moderate', 'count' => $counts['review']],
+                    ['label' => 'In review', 'icon' => 'clipboard-check', 'route' => 'moderate', ...self::badge($counts, 'review')],
                     ['label' => 'Categories', 'icon' => 'folder-tree', 'route' => 'admin.categories'],
                     ['label' => 'Tags', 'icon' => 'tags', 'route' => 'admin.tags'],
                     ['label' => 'Packs', 'icon' => 'box-open', 'route' => 'admin.packs'],
@@ -59,6 +59,9 @@ class AdminNav
                     ['label' => 'Subscriptions', 'icon' => 'repeat', 'route' => null],
                     ['label' => 'Transactions', 'icon' => 'receipt', 'route' => null],
                     ['label' => 'Coupons', 'icon' => 'ticket', 'route' => null],
+                    // The download LOG — who took what, and when. Not the
+                    // same entry as Settings → Downloads, which is the one
+                    // number deciding what a visitor gets for free.
                     ['label' => 'Downloads', 'icon' => 'arrow-down-to-line', 'route' => null],
                 ],
             ],
@@ -70,7 +73,7 @@ class AdminNav
                 'items' => [
                     ['label' => 'All users', 'icon' => 'user', 'route' => 'admin.users'],
                     ['label' => 'Contributors', 'icon' => 'user-music', 'route' => 'admin.contributors'],
-                    ['label' => 'Claims', 'icon' => 'shield-exclamation', 'route' => 'admin.claims', 'count' => $counts['claims']],
+                    ['label' => 'Claims', 'icon' => 'shield-exclamation', 'route' => 'admin.claims', ...self::badge($counts, 'claims')],
                 ],
             ],
 
@@ -124,7 +127,7 @@ class AdminNav
                 'icon' => 'shield-halved',
                 'items' => [
                     ['label' => 'Access log', 'icon' => 'right-to-bracket', 'route' => 'admin.security.access'],
-                    ['label' => 'Blocks & abuse', 'icon' => 'ban', 'route' => 'admin.security.abuse', 'count' => $counts['abuse']],
+                    ['label' => 'Blocks & abuse', 'icon' => 'ban', 'route' => 'admin.security.abuse', ...self::badge($counts, 'abuse')],
                 ],
             ],
 
@@ -134,13 +137,15 @@ class AdminNav
                 'icon' => 'wrench',
                 'items' => [
                     ['label' => 'Analytics', 'icon' => 'chart-line', 'route' => 'admin.analytics'],
+                    ['label' => 'SEO', 'icon' => 'magnifying-glass-chart', 'route' => 'admin.seo'],
                     // Moved out of Content: a redirect is not something you
                     // write, it is a repair to a URL that already existed.
-                    ['label' => 'Redirects', 'icon' => 'arrow-turn-right', 'route' => 'admin.redirects', 'count' => $counts['broken']],
-                    ['label' => 'Queue', 'icon' => 'list-check', 'route' => 'admin.queue', 'count' => $counts['queue']],
+                    ['label' => 'Redirects', 'icon' => 'arrow-turn-right', 'route' => 'admin.redirects', ...self::badge($counts, 'broken')],
+                    ['label' => 'Queue', 'icon' => 'list-check', 'route' => 'admin.queue', ...self::badge($counts, 'queue')],
                     ['label' => 'Storage', 'icon' => 'hard-drive', 'route' => 'admin.storage'],
+                    ['label' => 'Backups', 'icon' => 'box-archive', 'route' => 'admin.backups'],
                     ['label' => 'Activity log', 'icon' => 'clock-rotate-left', 'route' => 'admin.activity'],
-                    ['label' => 'Error logs', 'icon' => 'triangle-exclamation', 'route' => 'admin.errors', 'count' => $counts['errors']],
+                    ['label' => 'Error logs', 'icon' => 'triangle-exclamation', 'route' => 'admin.errors', ...self::badge($counts, 'errors')],
                     ['label' => 'Diagnostics', 'icon' => 'stethoscope', 'route' => 'admin.diagnostics'],
                 ],
             ],
@@ -150,13 +155,17 @@ class AdminNav
                 'label' => 'Settings',
                 'icon' => 'gear',
                 'items' => [
-                    ['label' => 'General', 'icon' => 'sliders', 'route' => null],
-                    ['label' => 'Homepage', 'icon' => 'house', 'route' => null],
-                    ['label' => 'Security', 'icon' => 'lock', 'route' => null],
-                    ['label' => 'Email & SMTP', 'icon' => 'envelope', 'route' => null],
-                    ['label' => 'Appearance', 'icon' => 'palette', 'route' => null],
-                    ['label' => 'Ads', 'icon' => 'rectangle-ad', 'route' => null],
-                    ['label' => 'Downloads', 'icon' => 'download', 'route' => null],
+                    ['label' => 'General', 'icon' => 'sliders', 'route' => 'admin.settings.general'],
+                    ['label' => 'Homepage', 'icon' => 'house', 'route' => 'admin.settings.homepage'],
+                    ['label' => 'Security', 'icon' => 'lock', 'route' => 'admin.settings.security'],
+                    ['label' => 'Email & SMTP', 'icon' => 'envelope', 'route' => 'admin.settings.email'],
+                    ['label' => 'Appearance', 'icon' => 'palette', 'route' => 'admin.settings.appearance'],
+                    ['label' => 'Ads', 'icon' => 'rectangle-ad', 'route' => 'admin.settings.ads'],
+                    // Its own entry rather than a section inside Ads: both
+                    // store third-party JavaScript, but switching the
+                    // advertising off must not switch off the analytics.
+                    ['label' => 'Code & tracking', 'icon' => 'code', 'route' => 'admin.settings.code'],
+                    ['label' => 'Downloads', 'icon' => 'download', 'route' => 'admin.settings.downloads'],
                 ],
             ],
 
@@ -173,8 +182,80 @@ class AdminNav
     /**
      * Badge numbers. Cached for a minute: the sidebar renders on every
      * admin page and these are three aggregate queries.
+     *
+     * PUBLIC because App\Support\Notices reads it too. The alternative was
+     * Notices running its own copies of these queries, which is how a bell
+     * ends up saying "1 claim" while the sidebar says 3 — and after that
+     * neither number is believed. One definition, two surfaces.
      */
-    protected static function counts(): array
+    /**
+     * Every reachable admin screen, flat, for the command palette.
+     *
+     * Derived from the same map the sidebar draws, so a screen added to the
+     * menu is findable the same day without anybody remembering to register
+     * it in a second list. Entries with a null route are the not-yet-built
+     * ones and are left out: a palette result that goes nowhere is worse
+     * than no result.
+     *
+     * NO DATABASE, NO CACHE. It is route() calls over a literal array, so
+     * the palette can ship it into the page and filter it in the browser —
+     * which is why typing "ads" answers before you finish the word.
+     *
+     * @return array<int, array{label: string, group: string, icon: string, url: string}>
+     */
+    public static function searchable(): array
+    {
+        $out = [];
+
+        foreach (self::groups() as $group) {
+            $groupLabel = $group['label'];
+
+            if (empty($group['items'])) {
+                if ($group['route'] ?? null) {
+                    $out[] = [
+                        'label' => $groupLabel,
+                        'group' => 'Panel',
+                        'icon' => $group['icon'],
+                        'url' => route($group['route']),
+                    ];
+                }
+
+                continue;
+            }
+
+            foreach ($group['items'] as $item) {
+                if (! ($item['route'] ?? null)) {
+                    continue;
+                }
+
+                $out[] = [
+                    'label' => $item['label'],
+                    'group' => $groupLabel,
+                    'icon' => $item['icon'],
+                    'url' => route($item['route']),
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * A badge: how many, and what it means.
+     *
+     * Written as one call rather than two array keys so that a new counter
+     * cannot arrive with a number and no level — which would render as a
+     * grey pill that looks disabled.
+     */
+    protected static function badge(array $counts, string $key): array
+    {
+        return [
+            'count' => $counts[$key] ?? 0,
+            'level' => Notices::levelOf($key),
+        ];
+    }
+
+    public static function counts(): array
     {
         return Cache::remember('admin.nav.counts', now()->addMinute(), fn () => [
             'review' => Sound::where('status', 'pending')->count(),

@@ -101,6 +101,11 @@ class ActivityCatalog
         'user.password.reset_by_owner' => ['label' => 'Password reset by its owner', 'icon' => 'key', 'category' => 'security', 'severity' => 'warning'],
         'user.sessions.revoked' => ['label' => 'Sessions ended', 'icon' => 'right-from-bracket', 'category' => 'security', 'severity' => 'warning'],
         'user.2fa.disabled' => ['label' => 'Two-factor disabled', 'icon' => 'shield-xmark', 'category' => 'security', 'severity' => 'danger'],
+        // Linking is the interesting one: it is the moment a second way into
+        // an existing account starts working, and "when did that become
+        // possible?" is a security question.
+        'user.oauth.linked' => ['label' => 'Google account linked', 'icon' => 'link', 'category' => 'security', 'severity' => 'warning'],
+        'user.oauth.registered' => ['label' => 'Signed up with Google', 'icon' => 'user-plus', 'category' => 'security', 'severity' => 'info'],
 
         // ─── Moderation ─────────────────────────────────────────────────
         'sound.approved' => ['label' => 'Sound approved', 'icon' => 'circle-check', 'category' => 'moderation', 'severity' => 'success'],
@@ -131,8 +136,15 @@ class ActivityCatalog
 
         // ─── Configuration ──────────────────────────────────────────────
         'settings.updated' => ['label' => 'Settings changed', 'icon' => 'sliders', 'category' => 'config', 'severity' => 'warning'],
+        // Its own action rather than one more settings.updated row: "when did
+        // the site go dark, and who did it" is the question you ask in a
+        // hurry, and it should not need reading the meta of eight identical
+        // rows to answer.
+        'site.status.changed' => ['label' => 'Site opened or closed', 'icon' => 'power-off', 'category' => 'config', 'severity' => 'danger'],
         'search.synonyms.updated' => ['label' => 'Synonyms changed', 'icon' => 'arrow-right-arrow-left', 'category' => 'config', 'severity' => 'info'],
         'storage.migrated' => ['label' => 'Files moved between disks', 'icon' => 'hard-drive', 'category' => 'config', 'severity' => 'warning'],
+        'backup.restored' => ['label' => 'Database restored from a backup', 'icon' => 'rotate-left', 'category' => 'config', 'severity' => 'danger'],
+        'backup.settings.changed' => ['label' => 'Backup schedule changed', 'icon' => 'box-archive', 'category' => 'config', 'severity' => 'info'],
     ];
 
     /** Prefix fallbacks, so an unlisted action still lands somewhere sane. */
@@ -147,6 +159,7 @@ class ActivityCatalog
         'settings' => ['category' => 'config', 'icon' => 'sliders', 'severity' => 'info'],
         'search' => ['category' => 'config', 'icon' => 'magnifying-glass', 'severity' => 'info'],
         'storage' => ['category' => 'config', 'icon' => 'hard-drive', 'severity' => 'info'],
+        'backup' => ['category' => 'config', 'icon' => 'box-archive', 'severity' => 'info'],
     ];
 
     /**

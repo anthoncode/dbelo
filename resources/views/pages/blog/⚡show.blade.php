@@ -183,6 +183,9 @@ new #[Layout('layouts.site')] class extends Component {
                 Browse the catalogue
             </a>
         </div>
+        {{-- After the article, where somebody who read it is deciding what
+             to do next — not interrupting the reading. --}}
+        <x-ad-slot name="blog" />
     </article>
 
     @if ($this->related->isNotEmpty())

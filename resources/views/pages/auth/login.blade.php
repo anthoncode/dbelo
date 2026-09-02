@@ -7,6 +7,10 @@
 
         <x-passkey-verify />
 
+        {{-- Above the form, not inside it: it is a different way in, not a
+             field of this one. --}}
+        <x-google-button />
+
         <form method="POST" action="{{ route('login.store') }}" class="flex flex-col gap-6">
             @csrf
 
@@ -40,6 +44,10 @@
                     </flux:link>
                 @endif
             </div>
+
+            {{-- Appears only once this address or account has failed a
+                 few times. Everyone else signs in without meeting it. --}}
+            <x-captcha form="login" />
 
             <!-- Remember Me -->
             <flux:checkbox name="remember" :label="__('Remember me')" :checked="old('remember')" />

@@ -4,8 +4,11 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use App\Http\Middleware\BlockIps;
+use App\Http\Middleware\CheckSiteStatus;
 use App\Http\Middleware\EnsureAccountIsActive;
 use App\Http\Middleware\RecordVisit;
+use App\Http\Middleware\RequireVerifiedEmail;
+use App\Http\Middleware\VerifyCaptcha;
 use App\Http\Middleware\WatchTraffic;
 use App\Services\ErrorReporter;
 use App\Services\RedirectResolver;
@@ -31,12 +34,31 @@ return Application::configure(basePath: dirname(__DIR__))
             // that a flood is making the server do.
             BlockIps::class,
             EnsureAccountIsActive::class,
+            // After the suspension check, not before: bypassing the closed
+            // door requires being an admin, and a suspended admin should
+            // have stopped being one a middleware earlier.
+            CheckSiteStatus::class,
+            // Checks the anti-robot token on the handful of POSTs that carry
+            // one. Appended to the whole group rather than added to each
+            // form, because Fortify owns three of those four routes — see
+            // VerifyCaptcha for the list and the reasoning.
+            VerifyCaptcha::class,
             // Terminable: it runs after the response has been sent, so
             // counting a visit never costs the visitor a millisecond.
             RecordVisit::class,
             // Also terminable: counting requests happens after the response,
             // so neither a visitor nor an attacker waits for it.
             WatchTraffic::class,
+        ]);
+
+        /*
+        | Named, not appended: unlike the three above, this one applies to
+        | exactly two routes. A gate that runs everywhere in order to do
+        | nothing almost everywhere is a gate whose real scope nobody can
+        | read off the route file.
+        */
+        $middleware->alias([
+            'verified.setting' => RequireVerifiedEmail::class,
         ]);
 
         // Gmail and Yahoo POST to the List-Unsubscribe URL from their own
@@ -46,6 +68,25 @@ return Application::configure(basePath: dirname(__DIR__))
         // the one-click button working.
         $middleware->validateCsrfTokens(except: [
             'unsubscribe/*',
+        ]);
+
+        /*
+        | The notification bar's "I closed this" cookie.
+        |
+        | Every other cookie this app sets is encrypted, and should stay that
+        | way. This one is written by JavaScript the instant somebody clicks
+        | the close button, and the browser cannot produce Laravel's
+        | encrypted format — so left in the default set it would be
+        | discarded, unread, on the very next request. The bar would come
+        | straight back and the close button would look broken.
+        |
+        | Nothing is lost by exempting it: it holds a hash of the message and
+        | nothing else. No identifier, no account, nothing worth forging —
+        | the worst a tampered value can do is hide a banner from the person
+        | who tampered with it.
+        */
+        $middleware->encryptCookies(except: [
+            \App\Support\Homepage::BAR_COOKIE,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -7,6 +7,7 @@ use App\Support\Clock;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -60,10 +61,45 @@ class RecordVisit
             }
 
             StatDaily::bump('visits.path', $this->path($request));
+
+            $this->countSoundView($request);
         } catch (\Throwable $e) {
             // Analytics must never be the reason a page fails. The response
             // has already gone out by now anyway.
             report($e);
+        }
+    }
+
+    /**
+     * One view for one sound.
+     *
+     * A direct increment rather than a counter batched in the cache. It is a
+     * single UPDATE on an indexed primary key, it runs in terminate() after
+     * the response has gone, and it is only on sound detail pages — so it
+     * costs a visitor nothing. If this site ever gets busy enough for one
+     * write per view to matter, the place to batch it is here, the same way
+     * WatchTraffic accumulates in the cache and flushes on a window.
+     *
+     * Bots are already excluded by countable(): a view count inflated by
+     * crawlers would answer "which sounds does nobody look at" with a
+     * confident lie.
+     */
+    protected function countSoundView(Request $request): void
+    {
+        if (! $request->routeIs('sounds.show')) {
+            return;
+        }
+
+        $sound = $request->route('sound');
+
+        // Resolved by route-model binding on a normal request; a bare slug
+        // if anything bypassed it, and then one lookup is the honest cost.
+        $id = is_object($sound)
+            ? ($sound->id ?? null)
+            : DB::table('sounds')->where('slug', $sound)->value('id');
+
+        if ($id) {
+            DB::table('sounds')->where('id', $id)->increment('views_count');
         }
     }
 

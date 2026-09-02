@@ -46,10 +46,12 @@ class Diagnostics
 
         foreach ([
             'buildFreshness', 'buildAssets',
+            'siteStatus', 'settingsWired',
             'appKey', 'appDebug', 'configCache',
             'database', 'pendingMigrations',
             'queueDriver', 'scheduler',
             'mailDriver',
+            'backupAge',
             'ffmpeg', 'uploadLimits',
             'searchEngine',
             'publicLink', 'writablePaths', 'exposedEnv',
@@ -70,6 +72,38 @@ class Diagnostics
         }
 
         return $checks;
+    }
+
+    /**
+     * Is the compiled stylesheet older than the code that needs it?
+     *
+     * Public so the admin layout can ask on every page, not just this
+     * screen. The check has existed here since the day it was written and it
+     * has still cost two separate afternoons — because it lives on a screen
+     * you only open once you already suspect something, and this failure
+     * does not feel like a broken build. It feels like one control that will
+     * not work: the switch has no colour, the panel has no padding, and
+     * everything else on the page looks fine.
+     *
+     * Reusing buildFreshness() rather than repeating its logic. Its source
+     * scan is cached for a minute, which is what makes this affordable on
+     * every admin request.
+     */
+    public function assetsBuild(): array
+    {
+        try {
+            return $this->buildFreshness();
+        } catch (Throwable) {
+            // Unknown is reported as fine. A banner that appears because a
+            // check misfired is worse than no banner: the first thing it
+            // teaches is that it can be ignored.
+            return $this->make('build.fresh', 'Front-end', 'Asset build', self::OK, '');
+        }
+    }
+
+    public function assetsStale(): bool
+    {
+        return $this->assetsBuild()['status'] !== self::OK;
     }
 
     /** @return array{ok: int, warn: int, fail: int} */
@@ -121,10 +155,61 @@ class Diagnostics
 
         $behind = (int) round(($newest - $built) / 60);
 
-        return $this->make('build.fresh', 'Front-end', 'Asset build', self::FAIL,
-            "The stylesheet is {$behind} minutes older than the newest source file.",
-            fix: 'Any CSS class written since then does not exist in the build, so those elements render unstyled — with no error anywhere. Leave the dev server running and this cannot happen again.',
+        /*
+         * SEVERITY BY AGE, not a flat FAIL.
+         *
+         * A flat FAIL was wrong, and wrong in the way this project keeps
+         * warning about: during active work the build goes behind every time
+         * a file is written, so the alarm was on almost permanently — and an
+         * alarm that is always on is one nobody reads, which is how the real
+         * one gets missed. It had already reached that state here.
+         *
+         * Under a day is ordinary drift between one build and the next. Over
+         * a day means somebody has been looking at a stale site for a day
+         * without noticing, which is the failure this check exists for.
+         */
+        $status = $behind >= 1440 ? self::FAIL : self::WARN;
+
+        $unit = fn (int $n, string $word) => $n.' '.\Illuminate\Support\Str::plural($word, $n);
+
+        $age = match (true) {
+            $behind >= 1440 => $unit((int) round($behind / 1440), 'day'),
+            $behind >= 60 => $unit((int) round($behind / 60), 'hour'),
+            default => $unit($behind, 'minute'),
+        };
+
+        return $this->make('build.fresh', 'Front-end', 'Asset build', $status,
+            "The stylesheet is {$age} older than the newest source file.",
+            fix: 'Any CSS class written since then does not exist in the build, so those elements render unstyled — with no error anywhere. Vite is not watching: start it and this stops happening after every change.',
             command: './dev.sh');
+    }
+
+    /**
+     * How far the build is behind, in minutes. 0 when it is not.
+     *
+     * Public so the banner can choose its own volume. The check above
+     * decides whether this is a problem; the banner decides how loudly to
+     * say so, and those are different questions.
+     */
+    public function assetsBehind(): int
+    {
+        try {
+            if (file_exists(public_path('hot'))) {
+                return 0;
+            }
+
+            $manifest = public_path('build/manifest.json');
+
+            if (! file_exists($manifest)) {
+                return PHP_INT_MAX;
+            }
+
+            $behind = $this->newestSourceTime() - filemtime($manifest);
+
+            return $behind > 0 ? (int) round($behind / 60) : 0;
+        } catch (Throwable) {
+            return 0;
+        }
     }
 
     /** Newest mtime across the files Vite compiles from. */
@@ -476,7 +561,270 @@ class Diagnostics
             PHP_VERSION.' · all required extensions loaded.');
     }
 
+    /**
+     * How old the newest backup is.
+     *
+     * The age, not the existence. A directory full of backups from three
+     * weeks ago is worse than an empty one, because it answers "am I covered"
+     * with a yes. This is also the only check here that can catch a
+     * scheduler that stopped WITHOUT the heartbeat noticing — the stamp is
+     * written by a closure, the backup by a command, and they fail
+     * separately.
+     */
+    private function backupAge(): array
+    {
+        if (! class_exists(\Spatie\Backup\BackupServiceProvider::class)) {
+            return $this->make('backup.age', 'Backups', 'Database backup', self::WARN,
+                'The backup package is not installed.',
+                fix: 'Nothing is being copied anywhere.',
+                command: 'composer require spatie/laravel-backup',
+                route: 'admin.backups');
+        }
+
+        try {
+            $disk = \Illuminate\Support\Facades\Storage::disk('backups');
+
+            $newest = collect($disk->allFiles())
+                ->filter(fn ($path) => str_ends_with($path, '.zip'))
+                ->map(fn ($path) => $disk->lastModified($path))
+                ->max();
+        } catch (Throwable) {
+            $newest = null;
+        }
+
+        if (! $newest) {
+            return $this->make('backup.age', 'Backups', 'Database backup', self::FAIL,
+                'No backup has ever been made.',
+                fix: 'The nightly job runs at 02:40. Until it has, there is nothing to restore from.',
+                route: 'admin.backups');
+        }
+
+        $hours = (int) round((time() - $newest) / 3600);
+
+        if ($hours > 48) {
+            return $this->make('backup.age', 'Backups', 'Database backup', self::FAIL,
+                "Newest copy is {$hours} hours old.",
+                fix: 'The nightly job has not run for more than two days. Check the scheduler.',
+                route: 'admin.backups');
+        }
+
+        if ($hours > 26) {
+            return $this->make('backup.age', 'Backups', 'Database backup', self::WARN,
+                "Newest copy is {$hours} hours old.",
+                fix: 'A night has been missed. One is not a problem; two means the schedule is not running.',
+                route: 'admin.backups');
+        }
+
+        return $this->make('backup.age', 'Backups', 'Database backup', self::OK,
+            $hours < 1 ? 'Taken less than an hour ago.' : "Taken {$hours} hours ago.");
+    }
+
     /* ═════════════════════════════ Helpers ═════════════════════════════ */
+
+    /**
+     * Is the site open to anybody but you?
+     *
+     * Belongs on this screen precisely because it is invisible from the
+     * inside: admins bypass the closed door, so a site left in "coming soon"
+     * after launch looks completely normal to the one person who could fix
+     * it. Nothing is thrown, nothing is logged, and every visitor gets a
+     * placeholder. That is the exact shape of failure this screen is for.
+     */
+    private function siteStatus(): array
+    {
+        $status = \App\Support\SiteStatus::current();
+
+        if ($status === \App\Support\SiteStatus::LIVE) {
+            return $this->make('site.status', 'Site', 'Public access', self::OK,
+                'Open to everyone.');
+        }
+
+        return $this->make('site.status', 'Site', 'Public access', self::WARN,
+            $status === \App\Support\SiteStatus::SOON
+                ? 'Closed — visitors get the coming-soon page.'
+                : 'Closed — visitors get the maintenance page.',
+            fix: 'Deliberate before launch, and invisible afterwards: you are an admin, so you see the real site either way. Nothing else will ever tell you this is still on.',
+            route: 'admin.settings.general');
+    }
+
+    /**
+     * Does every setting actually reach the site?
+     *
+     * The check that exists because of a real afternoon lost to it. A
+     * setting has two halves: AppServiceProvider::OVERLAY lays the stored
+     * value over a config key, and somewhere a view has to call config() on
+     * that key. Only the first half is code anybody remembers to write. Miss
+     * the second and the field saves perfectly, the activity log records the
+     * change, and the site keeps printing the sentence hard-coded in a
+     * template — with no error anywhere, in the panel or the log.
+     *
+     * From the outside that is indistinguishable from a broken save, which
+     * is why it costs an afternoon rather than a minute.
+     *
+     * The scan is a plain substring search over app/ and resources/views/.
+     * Crude on purpose: config() is called with a literal string in every
+     * one of those files, and a parser that understood PHP would be a
+     * hundred times the code for the same answer.
+     */
+    private function settingsWired(): array
+    {
+        $overlay = \App\Providers\AppServiceProvider::OVERLAY;
+        $declared = \App\Providers\AppServiceProvider::NOT_YET_CONSUMED;
+
+        if ($overlay === []) {
+            return $this->make('settings.wired', 'Site', 'Settings reach the site', self::OK,
+                'Nothing to check.');
+        }
+
+        /*
+         * Keys Laravel itself consumes, in files this scan does not read.
+         * Absence proves nothing for these, so their presence in a setting's
+         * target list is enough to call that setting wired — which is how
+         * site.name passes: no view reads dbelo.site.name, every view reads
+         * app.name, and the overlay writes both.
+         */
+        $framework = ['app.name', 'app.timezone', 'mail.from.name', 'mail.from.address'];
+
+        $haystack = $this->sourceText();
+
+        $orphans = [];
+        $waiting = [];
+        $stale = [];
+
+        foreach ($overlay as $setting => $targets) {
+            /*
+             * The setting key itself counts as a needle, not only its config
+             * targets. Plenty of code reads a setting through
+             * Setting::read('site.status') rather than through config(), and
+             * that is a real reader — it just spells the key differently.
+             */
+            $wired = $this->readsKey($haystack, $setting);
+
+            foreach ($targets as $target) {
+                if ($wired) {
+                    break;
+                }
+
+                if (in_array($target, $framework, true) || $this->readsKey($haystack, $target)) {
+                    $wired = true;
+                }
+            }
+
+            if (array_key_exists($setting, $declared)) {
+                // Declared as not-yet-used. If a reader has appeared since,
+                // the declaration is stale and the field is still wearing a
+                // "Not used yet" chip that has become a lie.
+                $wired ? $stale[] = $setting : $waiting[] = $setting;
+
+                continue;
+            }
+
+            if (! $wired) {
+                $orphans[] = $setting;
+            }
+        }
+
+        if ($orphans !== []) {
+            return $this->make('settings.wired', 'Site', 'Settings reach the site', self::WARN,
+                'Saved but never read: '.implode(', ', $orphans).'.',
+                fix: 'These change nothing on the site. Either a view is missing its config() call, or the setting belongs to a feature not built yet — in which case list it in AppServiceProvider::NOT_YET_CONSUMED so the field says so instead of pretending.',
+                route: 'admin.settings.general');
+        }
+
+        if ($stale !== []) {
+            return $this->make('settings.wired', 'Site', 'Settings reach the site', self::WARN,
+                implode(', ', $stale).' is marked not-yet-used, but something reads it now.',
+                fix: 'Remove it from AppServiceProvider::NOT_YET_CONSUMED, or its field keeps telling the operator it does nothing.',
+                route: 'admin.settings.general');
+        }
+
+        $count = count($overlay) - count($waiting);
+
+        return $this->make('settings.wired', 'Site', 'Settings reach the site', self::OK,
+            $waiting === []
+                ? "{$count} settings, each read by at least one view."
+                : "{$count} settings reach the site; ".count($waiting).' waiting on a feature ('.implode(', ', $waiting).').');
+    }
+
+    /**
+     * Is this key read anywhere?
+     *
+     * Matched on a key BOUNDARY, not as a loose substring. Without the
+     * lookahead, "dbelo.site" would be found inside "dbelo.site.description"
+     * and every sibling setting would look wired because one of them was.
+     *
+     * A view may legitimately read the whole parent array —
+     * config('dbelo.legal') rather than config('dbelo.legal.support_email') —
+     * so a complete parent counts as a reader. One level up only: reducing
+     * to a single segment would match half the codebase.
+     */
+    private function readsKey(string $haystack, string $key): bool
+    {
+        if (preg_match('/'.preg_quote($key, '/').'(?![\w.])/', $haystack)) {
+            return true;
+        }
+
+        $parent = implode('.', array_slice(explode('.', $key), 0, -1));
+
+        return substr_count($parent, '.') >= 1
+            && preg_match('/'.preg_quote($parent, '/').'(?![\w.])/', $haystack) === 1;
+    }
+
+    /**
+     * Every PHP and Blade source file, concatenated.
+     *
+     * Crude on purpose: both config() and Setting::read() are called with a
+     * literal string in all of them, and a parser that understood PHP would
+     * be a hundred times the code for the same answer.
+     *
+     * TWO PLACES ARE SKIPPED, and skipping them is what makes the check mean
+     * anything:
+     *
+     *   AppServiceProvider holds the overlay map itself, so every key
+     *   appears there by definition.
+     *
+     *   The Settings screens are where keys are WRITTEN. A field that saves
+     *   a value nothing reads still mentions its own key, and counting that
+     *   as a reader would make the check pass in exactly the case it exists
+     *   to catch.
+     */
+    private function sourceText(): string
+    {
+        $text = '';
+        $skip = ['AppServiceProvider.php'];
+
+        foreach ([app_path(), resource_path('views')] as $root) {
+            if (! is_dir($root)) {
+                continue;
+            }
+
+            $files = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
+            );
+
+            foreach ($files as $file) {
+                if (! $file->isFile() || $file->getExtension() !== 'php') {
+                    continue;
+                }
+
+                $path = $file->getPathname();
+
+                if (str_contains($path, '/pages/admin/settings/')) {
+                    continue;
+                }
+
+                foreach ($skip as $name) {
+                    if (str_ends_with($path, $name)) {
+                        continue 2;
+                    }
+                }
+
+                $text .= file_get_contents($path);
+            }
+        }
+
+        return $text;
+    }
 
     private function make(
         string $key,

@@ -241,6 +241,12 @@ new #[Layout('layouts.site')] #[Title('Sound effect')] class extends Component {
 
             <x-waveform-player :sound="$sound" :bars="130" height="h-16" button="size-14" class="mt-7" />
 
+            {{-- Under the player, above the description — and a long way
+                 from the download button on purpose. An ad beside Download
+                 collects accidental clicks, and accidental clicks are what
+                 costs an ad account rather than a placement. --}}
+            <x-ad-slot name="sound" />
+
             {{-- Description, clamped. The reference's "See more" is the right
                  call: a paragraph pushing the download button below the fold
                  costs more than the paragraph is worth. --}}
@@ -301,12 +307,37 @@ new #[Layout('layouts.site')] #[Title('Sound effect')] class extends Component {
                 </div>
             </div>
 
+            {{-- ══════════════════════════════════════════════════════════
+                 THE LINE UNDER THE BUTTON
+                 ══════════════════════════════════════════════════════════
+                 It used to say "Free account needed to download" to
+                 everybody who was not signed in. That is now only true some
+                 of the time, and a button that says one thing while the
+                 line under it says another is how a visitor learns not to
+                 read either.
+
+                 A guest with files left is told the number BEFORE pressing,
+                 which is the whole mechanism: the count is what makes the
+                 sign-up page later feel like an expected step rather than a
+                 refusal. Fully qualified because a ⚡ component's template
+                 does not see the `use` imports in its PHP head. --}}
             <div class="micro !text-paper/35 mt-3 text-right">
                 @auth
                     @php($remaining = auth()->user()->remainingDownloadsToday())
                     {{ $remaining === null ? 'Unlimited downloads' : $remaining.' left today' }}
                 @else
-                    Free account needed to download
+                    @if ($sound->is_premium)
+                        Part of a plan — sign in to download
+                    @elseif (! \App\Support\Downloads::guestsAllowed())
+                        Free account needed to download
+                    @elseif (\App\Support\Downloads::guestHasTaken(request(), $sound->id))
+                        You already have this one — re-downloading is free
+                    @else
+                        @php($left = \App\Support\Downloads::guestRemaining(request()))
+                        {{ $left > 0
+                            ? $left.($left === 1 ? ' free download left' : ' free downloads left').' — no account needed'
+                            : 'Free account needed to keep downloading' }}
+                    @endif
                 @endauth
             </div>
         </div>

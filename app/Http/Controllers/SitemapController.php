@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Category;
+use App\Models\Collection;
 use App\Models\Post;
 use App\Models\Sound;
 use Illuminate\Http\Response;
@@ -64,6 +65,36 @@ class SitemapController extends Controller
                     'changefreq' => 'weekly',
                     'priority' => '0.7',
                 ]);
+            }
+
+            /*
+             * Packs.
+             *
+             * Missing until now — the sitemap was written before packs
+             * existed and nobody went back. These are the URLs meant to rank
+             * for "podcast sound effects" and Google could not see them.
+             *
+             * Featured only, matching the route: a private collection 404s at
+             * /packs/{slug}, so listing one here would advertise a dead URL.
+             */
+            if (Collection::featured()->exists()) {
+                $urls->push([
+                    'loc' => route('packs.index'),
+                    'changefreq' => 'weekly',
+                    'priority' => '0.8',
+                ]);
+
+                Collection::featured()
+                    ->select(['slug', 'updated_at'])
+                    ->get()
+                    ->each(function ($pack) use ($urls) {
+                        $urls->push([
+                            'loc' => route('packs.show', $pack->slug),
+                            'lastmod' => $pack->updated_at?->toAtomString(),
+                            'changefreq' => 'weekly',
+                            'priority' => '0.8',
+                        ]);
+                    });
             }
 
             Sound::published()

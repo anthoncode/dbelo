@@ -11,14 +11,57 @@ Route::livewire('/', 'pages::home')->name('home');
 Route::get('sitemap.xml', SitemapController::class)->name('sitemap');
 
 /*
+| ads.txt.
+|
+| A route rather than a file in public/, because the content is a setting —
+| and because a 404 here is not an error anybody sees: buyers simply treat
+| the inventory as unauthorised and bid less. Served as plain text, and
+| genuinely 404s when empty, so "not configured" and "configured with
+| nothing" cannot be told apart by a crawler either.
+*/
+Route::get('ads.txt', function () {
+    $contents = trim((string) \App\Support\Ads::text('ads_txt'));
+
+    abort_if($contents === '', 404);
+
+    return response($contents, 200, ['Content-Type' => 'text/plain; charset=UTF-8']);
+})->name('ads.txt');
+
+/*
 | Public catalogue. Everyone can browse and listen; only the download
 | route is gated, and the gate itself lives in DownloadController.
 */
 Route::livewire('sounds', 'pages::sounds')->name('sounds.index');
 
+/*
+| Downloading.
+|
+| NO 'auth' MIDDLEWARE, on purpose. Whether a visitor without an account may
+| take a file is a setting — Admin → Settings → Downloads — and a setting
+| cannot be enforced by a middleware that decided the answer before the
+| request reached the code that reads it. The gate is in DownloadController,
+| where the plan, the free allowance and the licence are already checked.
+|
+| 'verified.setting' stays: it lets guests through by design and only bites
+| a signed-in account that has not confirmed its address.
+|
+| 'throttle:downloads' stays, and it is the one that matters more now. The
+| free allowance is a cookie and is meant to be resettable; this limiter and
+| WatchTraffic are what stop a script walking the catalogue.
+*/
 Route::get('sounds/{sound}/download', DownloadController::class)
-    ->middleware(['auth', 'throttle:downloads'])
+    ->middleware(['verified.setting', 'throttle:downloads'])
     ->name('sounds.download');
+
+/*
+| Where a download that did not happen lands.
+|
+| A real page rather than abort(429): somebody who just tried to take a
+| sound is the most interested visitor the site will see all day, and the
+| old answer was a grey error page with one sentence on it.
+*/
+Route::get('downloads/limit', \App\Http\Controllers\DownloadLimitController::class)
+    ->name('downloads.limit');
 
 Route::livewire('sounds/{sound}/edit', 'pages::sounds.edit')
     ->middleware('auth')
@@ -53,7 +96,7 @@ Route::livewire('packs', 'pages::packs')->name('packs.index');
 Route::livewire('packs/{pack}', 'pages::packs.show')->name('packs.show');
 
 Route::livewire('upload', 'pages::upload')
-    ->middleware('auth')
+    ->middleware(['auth', 'verified.setting'])
     ->name('upload');
 
 /*
@@ -157,6 +200,14 @@ Route::livewire('admin/diagnostics', 'pages::admin.diagnostics')
     ->middleware('auth')
     ->name('admin.diagnostics');
 
+Route::livewire('admin/backups', 'pages::admin.backups')
+    ->middleware('auth')
+    ->name('admin.backups');
+
+Route::livewire('admin/seo', 'pages::admin.seo')
+    ->middleware('auth')
+    ->name('admin.seo');
+
 /*
 | Security. A group rather than one screen, because watching and configuring
 | are different activities done at different moments: these two are for
@@ -184,6 +235,75 @@ Route::livewire('admin/security/access', 'pages::admin.security.access')
 Route::livewire('admin/security/abuse', 'pages::admin.security.abuse')
     ->middleware('auth')
     ->name('admin.security.abuse');
+
+/*
+| Settings. One route per screen rather than one screen with tabs: a tab is
+| a URL you cannot link somebody to, and "the setting is in Admin → Settings
+| → General" is an instruction that should be a link.
+*/
+Route::livewire('admin/settings/general', 'pages::admin.settings.general')
+    ->middleware('auth')
+    ->name('admin.settings.general');
+
+Route::livewire('admin/settings/homepage', 'pages::admin.settings.homepage')
+    ->middleware('auth')
+    ->name('admin.settings.homepage');
+
+Route::livewire('admin/settings/security', 'pages::admin.settings.security')
+    ->middleware('auth')
+    ->name('admin.settings.security');
+
+Route::livewire('admin/settings/email', 'pages::admin.settings.email')
+    ->middleware('auth')
+    ->name('admin.settings.email');
+
+Route::livewire('admin/settings/appearance', 'pages::admin.settings.appearance')
+    ->middleware('auth')
+    ->name('admin.settings.appearance');
+
+Route::livewire('admin/settings/ads', 'pages::admin.settings.ads')
+    ->middleware('auth')
+    ->name('admin.settings.ads');
+
+Route::livewire('admin/settings/code', 'pages::admin.settings.code')
+    ->middleware('auth')
+    ->name('admin.settings.code');
+
+Route::livewire('admin/settings/downloads', 'pages::admin.settings.downloads')
+    ->middleware('auth')
+    ->name('admin.settings.downloads');
+
+/*
+| Records for the ⌘K palette.
+|
+| SCREENS ARE NOT SERVED HERE. AdminNav::searchable() ships the whole screen
+| list into the page, so "where is the ad setting" is answered in the browser
+| before the word is finished — and stays answered when this endpoint is slow
+| or when the database is the thing being investigated. This route only
+| carries what has to be queried.
+*/
+Route::get('admin/palette', \App\Http\Controllers\AdminPaletteController::class)
+    ->middleware(['auth', 'throttle:search'])
+    ->name('admin.palette');
+
+/*
+| Signing in with Google.
+|
+| Guest-only: an already signed-in visitor following this link would be sent
+| to Google and back to be logged in as somebody they already are — or, worse,
+| as somebody else, on a shared machine.
+|
+| The callback address is derived from this route name and shown on the
+| settings screen to be copied into Google Cloud Console. It is never stored:
+| APP_URL already decides it, and a second copy would disagree in silence.
+*/
+Route::middleware('guest')->group(function () {
+    Route::get('auth/google/redirect', [\App\Http\Controllers\GoogleAuthController::class, 'redirect'])
+        ->name('auth.google.redirect');
+
+    Route::get('auth/google/callback', [\App\Http\Controllers\GoogleAuthController::class, 'callback'])
+        ->name('auth.google.callback');
+});
 
 Route::livewire('admin/redirects', 'pages::admin.redirects')
     ->middleware('auth')

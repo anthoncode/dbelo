@@ -1,12 +1,15 @@
 <?php
 
 use App\Console\Commands\RollupStatsCommand;
+use App\Console\Commands\RunBackupCommand;
 use App\Console\Commands\SendDigestCommand;
 use App\Jobs\QueueHeartbeat;
 use App\Models\ActivityLog;
 use App\Models\AbuseSignal;
 use App\Models\ErrorGroup;
 use App\Models\LoginAttempt;
+use App\Services\Alerts;
+use App\Services\BackupManager;
 use App\Services\Diagnostics;
 use App\Services\SecurityWatch;
 use Illuminate\Support\Facades\Cache;
@@ -133,3 +136,62 @@ Schedule::call(fn () => app(SecurityWatch::class)->scan())
 Schedule::command('model:prune', ['--model' => [LoginAttempt::class, AbuseSignal::class]])
     ->dailyAt('03:40')
     ->withoutOverlapping();
+
+/*
+| Backups.
+|
+| --only-db, always. The audio is deliberately not in the nightly archive:
+| it is hundreds of times the size of the database, most nights none of it
+| has changed, and a nightly zip of it would fill the disk it is stored on
+| and stop the one backup that was working. Audio leaves through
+| Admin → Backups, by hand, in selections a person chooses.
+|
+| Hourly, and the command decides whether this is its hour — daily, weekly,
+| monthly or off, at an hour chosen in Admin → Backups. The schedule cannot
+| hold that itself: it is built once when the console boots, and a setting
+| changed a minute later would be ignored until the process restarted.
+|
+| Rotation is ours too, not spatie's. Its cleanup thins by age; what was
+| asked for is a flat count — keep the newest three, the newest push the
+| oldest out. Two different promises, and a strategy trying to keep both
+| keeps neither.
+*/
+Schedule::command(RunBackupCommand::class)->hourly()->withoutOverlapping();
+
+/*
+| "Nothing has been backed up for too long."
+|
+| A SEPARATE CHECK, and the more important of the two. The command above
+| reports its own crashes — but a command that crashes and a command that
+| silently never runs look identical from the outside, and the second is the
+| more common failure by a wide margin: a scheduler that stopped, a cron
+| entry lost in a deploy, a queue worker nobody restarted. Only something
+| that looks at the FILES can tell you that.
+|
+| Same principle as the Backups screen: the files are the record, never a
+| table claiming what the files contain.
+|
+| 26 hours rather than 24, so a daily backup running a few minutes late is
+| not an alarm. Alerts::backupOverdue holds a one-a-day cooldown of its own —
+| this runs hourly, and twenty-four identical emails before breakfast is how
+| an alert folder becomes a filter rule.
+|
+| ->name() BEFORE ->withoutOverlapping(). For a closure the name is required
+| and the exception is thrown at DEFINITION time, which means it fires for
+| every artisan command — including `migrate`. That cost hours once already.
+*/
+Schedule::call(function () {
+    $newest = collect(app(BackupManager::class)->backups())
+        ->reject(fn ($b) => $b['safety'])
+        ->max(fn ($b) => $b['at']->timestamp);
+
+    $hours = $newest
+        ? (int) round((time() - $newest) / 3600)
+        : 999;
+
+    if ($hours > 26) {
+        app(Alerts::class)->backupOverdue($hours);
+    }
+})
+    ->name('backup-overdue')
+    ->hourly();

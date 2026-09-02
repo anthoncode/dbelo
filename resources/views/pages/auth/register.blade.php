@@ -5,6 +5,9 @@
         <!-- Session Status -->
         <x-auth-session-status class="text-center" :status="session('status')" />
 
+        {{-- A Google sign-up skips this whole form, so it goes above it. --}}
+        <x-google-button label="{{ __('Sign up with Google') }}" />
+
         <form method="POST" action="{{ route('register.store') }}" class="flex flex-col gap-6">
             @csrf
             <!-- Name -->
@@ -68,6 +71,10 @@
                     </span>
                 </span>
             </label>
+
+            {{-- The form that matters most: a bot account is a bot with a
+                 free download quota. --}}
+            <x-captcha form="register" />
 
             <div class="flex items-center justify-end">
                 <flux:button type="submit" variant="primary" class="w-full" data-test="register-user-button">

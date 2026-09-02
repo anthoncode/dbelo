@@ -60,6 +60,25 @@ return [
         ],
 
         /*
+        | Where backups land.
+        |
+        | Its own disk so the destination is one line to change: today it is
+        | this machine, and the day R2 is on it becomes 'r2' in config/backup.php
+        | without touching anything else.
+        |
+        | A backup on the same disk as the database is not a backup — it is an
+        | undo button. A useful one, because "I broke the data with a bad
+        | query" is the most likely accident while building, but it survives
+        | nothing that happens to the machine.
+        */
+        'backups' => [
+            'driver' => 'local',
+            'root' => storage_path('app/backups'),
+            'throw' => false,
+            'report' => false,
+        ],
+
+        /*
         | Cloudflare R2. Speaks the S3 protocol, so it uses the same driver
         | with a custom endpoint. Chosen over S3 because R2 does not charge
         | for egress, and serving audio is almost entirely egress.

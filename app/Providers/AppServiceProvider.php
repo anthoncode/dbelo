@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Listeners\RecordAuthEvents;
+use App\Models\Setting;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -33,8 +34,137 @@ class AppServiceProvider extends ServiceProvider
          */
         Event::subscribe(RecordAuthEvents::class);
 
+        $this->applySettings();
+
+        // AFTER applySettings: the mail transport reads site.name for the
+        // sender name, and that is one of the values applySettings lays over
+        // config. Reversed, the first email of every boot would go out
+        // signed with the name from .env.
+        \App\Support\Email::apply();
+
+        $this->configureAlerts();
         $this->configureDefaults();
         $this->configureRateLimiting();
+    }
+
+    /**
+     * The one alert that cannot wait for a schedule.
+     *
+     * Hooked to the model rather than to the form: the copyright form is one
+     * way a claim arrives today, and staff entering one by hand — or an
+     * import, or an API later — are ways it could arrive tomorrow. A
+     * listener on creation catches all of them without anybody remembering
+     * to add a line.
+     *
+     * Registered here rather than inside the model so App\Models\Claim stays
+     * a model. Alerts::claimReceived never throws, so a mail server that is
+     * down cannot turn a complainant's submission into an error page.
+     */
+    protected function configureAlerts(): void
+    {
+        \App\Models\Claim::created(function ($claim) {
+            app(\App\Services\Alerts::class)->claimReceived($claim);
+        });
+    }
+
+    /**
+     * What a setting overwrites once somebody has changed it.
+     *
+     * The whole point of this map. Without it a "site name" saved in the
+     * panel would be a value only the settings screen knows about, and every
+     * view in the project would still print the one from the config file —
+     * two definitions of one fact, which is the bug class this project keeps
+     * running into. With it there is exactly ONE reader everywhere,
+     * config(), and the stored value simply wins.
+     *
+     * A key may land in more than one place: site.name also becomes app.name
+     * so the layouts, the mail sender and the page titles that already read
+     * it pick the change up without being touched.
+     *
+     * DELIBERATELY ABSENT: app.url and app.timezone.
+     *
+     *   app.url       is what signs download links and builds password-reset
+     *                 URLs. Letting a database row move it is how a reset
+     *                 link starts pointing at another host with nothing
+     *                 failing anywhere.
+     *   app.timezone  decides how timestamps are WRITTEN. dbelo.timezone
+     *                 only decides which day a stored moment is counted in.
+     *                 Conflating them would silently reinterpret every row
+     *                 already in the database.
+     *
+     * PUBLIC because Diagnostics reads it: this map is only half a wire.
+     * The other half is a view actually calling config() on the target, and
+     * nothing enforces that — the first version of this shipped with two
+     * settings whose consumers did not exist, which looked exactly like a
+     * broken save. Diagnostics::settingsWired() checks the second half.
+     */
+    public const OVERLAY = [
+        // mail.from.name is listed SEPARATELY from app.name and not implied
+        // by it. config/mail.php reads env('MAIL_FROM_NAME', env('APP_NAME'))
+        // when the config file is evaluated, which happens long before this
+        // provider boots — so overwriting app.name afterwards leaves the
+        // sender name frozen at whatever env said. Two config keys, both
+        // written, because one does not follow the other.
+        'site.name' => ['dbelo.site.name', 'app.name', 'mail.from.name'],
+        'site.description' => ['dbelo.site.description'],
+        'site.footer' => ['dbelo.site.footer'],
+        'site.admin_email' => ['dbelo.site.admin_email'],
+        'site.status' => ['dbelo.site.status'],
+        'site.status_message' => ['dbelo.site.status_message'],
+        'legal.support_email' => ['dbelo.legal.support_email'],
+        'timezone' => ['dbelo.timezone'],
+    ];
+
+    /**
+     * Settings that are stored on purpose for something not built yet.
+     *
+     * Declared rather than tolerated. Without this list Diagnostics would
+     * warn about them for months, and a warning that is permanently lit is
+     * one nobody reads — which is how the real one gets missed. Declaring it
+     * also puts the "Not used yet" chip on the field itself, so the screen
+     * admits it instead of the operator having to find out by testing.
+     *
+     * A key leaves this list the day its consumer is written.
+     */
+    public const NOT_YET_CONSUMED = [
+        // site.admin_email used to be here. Its consumer now exists —
+        // App\Services\Alerts sends the backup and copyright-claim alerts
+        // to it — so the entry came out in the same commit that built the
+        // sender. Diagnostics would have caught it either way: a key listed
+        // here that something reads is reported as a stale declaration,
+        // because the field would still be wearing a chip saying it does
+        // nothing.
+    ];
+
+    /**
+     * Lay the stored settings over the config defaults.
+     *
+     * One cached array, read once per request. Wrapped: a settings table
+     * that cannot be read must leave the site running on its defaults, not
+     * take it down — this runs on every request including the ones made
+     * while the database is being restored.
+     */
+    protected function applySettings(): void
+    {
+        try {
+            $stored = Setting::cached();
+        } catch (\Throwable) {
+            return;
+        }
+
+        foreach (self::OVERLAY as $key => $targets) {
+            $value = $stored[$key] ?? null;
+
+            // Absent and empty both mean "nobody changed this", which is what
+            // the settings screen writes when a field is cleared.
+            if ($value === null || $value === '') {
+                continue;
+            }
+
+            foreach ($targets as $target) {
+                config([$target => $value]);
+            }
+        }
     }
 
     /**

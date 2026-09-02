@@ -1,10 +1,31 @@
 @props(['groupKey', 'group'])
 
 @php
+    // Class-string alias rather than a `use` statement. A component view is
+    // included, not required at the top of a file, and fully qualifying
+    // Notices nine times below reads worse than naming it once.
+    $N = \App\Support\Notices::class;
+
     $isFlat = empty($group['items']);
-    $isActive = \App\Support\AdminNav::matches($group['route'] ?? null);
-    $hasActiveChild = collect($group['items'])->contains(fn ($i) => \App\Support\AdminNav::matches($i['route']));
+    $isActive = ($group['route'] ?? null) && request()->routeIs($group['route']);
+    $hasActiveChild = collect($group['items'])->contains(fn ($i) => $i['route'] && request()->routeIs($i['route']));
     $count = collect($group['items'])->sum(fn ($i) => $i['count'] ?? 0);
+
+    /*
+     * THE GROUP BADGE TAKES THE COLOUR OF ITS WORST LIVE CHILD.
+     *
+     * Only children that actually have a number vote. Without that filter a
+     * group holding one red counter sitting at zero and one amber counter
+     * at four would render red — a group shouting about a problem it does
+     * not have, which is precisely the habit that teaches somebody to stop
+     * reading badges.
+     */
+    $liveLevels = collect($group['items'])
+        ->filter(fn ($i) => ($i['count'] ?? 0) > 0)
+        ->map(fn ($i) => $i['level'] ?? $N::INFO)
+        ->all();
+
+    $groupLevel = $N::worstOf($liveLevels);
 @endphp
 
 {{-- ── Single-item group: a plain link ── --}}
@@ -51,7 +72,12 @@
                 {{-- Collapsed, the badge has nowhere to sit but on the icon --}}
                 @if ($count > 0)
                     <span x-show="collapsed" x-cloak
-                          class="absolute -right-2 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-paper px-1 text-[0.6rem] font-bold text-ink">
+                          @class([
+                              'absolute -right-2 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[0.6rem] font-bold',
+                              'bg-danger text-white' => $groupLevel === $N::DANGER,
+                              'bg-warning text-ink' => $groupLevel === $N::WARNING,
+                              'bg-info text-white' => $groupLevel === $N::INFO,
+                          ])>
                         {{ $count }}
                     </span>
                 @endif
@@ -61,7 +87,12 @@
 
             @if ($count > 0)
                 <span x-show="! collapsed" x-cloak
-                      class="grid size-[22px] shrink-0 place-items-center rounded-full bg-paper text-[0.68rem] font-bold text-ink">
+                      @class([
+                          'grid size-[22px] shrink-0 place-items-center rounded-full text-[0.68rem] font-bold',
+                          'bg-danger text-white' => $groupLevel === $N::DANGER,
+                          'bg-warning text-ink' => $groupLevel === $N::WARNING,
+                          'bg-info text-white' => $groupLevel === $N::INFO,
+                      ])>
                     {{ $count }}
                 </span>
             @endif
@@ -78,7 +109,7 @@
          is visual noise, a dot is enough to mark the rhythm. --}}
     <div x-show="open['{{ $groupKey }}'] && ! collapsed" x-cloak x-collapse class="mt-0.5 space-y-0.5">
         @foreach ($group['items'] as $item)
-            @php $childActive = \App\Support\AdminNav::matches($item['route']); @endphp
+            @php $childActive = $item['route'] && request()->routeIs($item['route']); @endphp
 
             @if ($item['route'])
                 <a href="{{ route($item['route']) }}" wire:navigate
@@ -94,8 +125,26 @@
                     ])></span>
                     <span class="min-w-0 flex-1 truncate">{{ $item['label'] }}</span>
 
+                    {{-- The badge wears what it MEANS, not how big it is.
+
+                         Red is a promise: an open claim, an attack, an error
+                         reaching real visitors. Amber is this week's problem.
+                         Blue is work waiting in a queue that is working —
+                         "12 sounds in review" is a catalogue with
+                         contributors in it, and painting that the same red as
+                         a copyright claim teaches the eye to skip both.
+
+                         The level comes from AdminNav::badge(), so a counter
+                         can never arrive with a number and no colour. --}}
                     @if (($item['count'] ?? 0) > 0)
-                        <span class="grid size-[20px] shrink-0 place-items-center rounded-full bg-paper text-[0.64rem] font-bold text-ink">
+                        @php $level = $item['level'] ?? $N::INFO; @endphp
+
+                        <span @class([
+                            'grid size-[20px] shrink-0 place-items-center rounded-full text-[0.64rem] font-bold',
+                            'bg-danger text-white' => $level === $N::DANGER,
+                            'bg-warning text-ink' => $level === $N::WARNING,
+                            'bg-info text-white' => $level === $N::INFO,
+                        ])>
                             {{ $item['count'] }}
                         </span>
                     @endif

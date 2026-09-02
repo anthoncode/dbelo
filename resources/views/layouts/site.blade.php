@@ -5,6 +5,18 @@
 </head>
 <body class="min-h-screen">
 
+    {{-- Immediately after <body>, which is where Google Tag Manager's
+         <noscript> and several chat widgets are required to sit. Panels that
+         offer only "header" and "footer" leave those with nowhere correct to
+         go, so they get pasted into the head and quietly never run. --}}
+    {!! \App\Support\CustomCode::bodyStart() !!}
+
+    {{-- Order matters. The two admin banners say "what you are looking at is
+         not what everybody else is looking at", and that has to be the first
+         thing on the page. For a visitor neither renders, so the promotional
+         bar is the top of the site — which is where it belongs. --}}
+    <x-site-status-banner />
+
     @if (session()->has('impersonator_id'))
         {{-- Impossible to miss on purpose: acting as someone else without
              realising it is how mistakes get made. --}}
@@ -19,6 +31,8 @@
             </a>
         </div>
     @endif
+
+    <x-promo-bar />
 
     @php
         $navLinks = array_values(array_filter([
@@ -50,13 +64,7 @@
         <div class="mx-auto max-w-[1160px] rounded-full bg-surface px-4 py-2.5 shadow-soft-lg transition duration-500 dark:bg-surface-dark">
             <div class="flex items-center gap-3">
 
-                <a href="{{ route('home') }}" wire:navigate
-                   class="flex shrink-0 items-center gap-2.5 pl-2 text-[1.25rem] font-bold tracking-[-0.04em]">
-                    <span class="grid size-8 place-items-center rounded-[10px] bg-brand">
-                        <x-icon name="waveform-lines" style="solid" class="text-[13px] text-white" />
-                    </span>
-                    dbelo
-                </a>
+                <x-site-logo />
 
                 {{-- Public links. Everything an anonymous visitor might want,
                      and nothing else — the account items live behind the
@@ -298,8 +306,21 @@
     </main>
 
     <footer class="mx-auto mt-16 max-w-[1160px] border-t border-ink/[0.07] px-6 py-10 pb-32 dark:border-paper/10">
+        {{-- The paragraph from Admin → Settings → General.
+             Hidden entirely when empty rather than left as a blank gap: the
+             footer has to look finished with the setting untouched. --}}
+        @if (filled(config('dbelo.site.footer')))
+            <p class="mb-6 max-w-[62ch] text-sm leading-relaxed text-ink/45 dark:text-paper/45">
+                {{ config('dbelo.site.footer') }}
+            </p>
+        @endif
+
         <div class="flex flex-wrap items-center justify-between gap-4 text-sm text-ink/45 dark:text-paper/45">
-            <span>&copy; {{ date('Y') }} dbelo — sound effects library</span>
+            {{-- The name comes from config, not from the word "dbelo" typed
+                 here. That literal is exactly why the Site name field looked
+                 like it did nothing: the title changed and the footer did
+                 not, on the same page. --}}
+            <span>&copy; {{ date('Y') }} {{ config('app.name', 'dbelo') }} — sound effects library</span>
 
             <nav class="flex flex-wrap gap-5">
                 <a href="{{ route('legal.licenses') }}" wire:navigate class="transition hover:text-brand">Licenses</a>
@@ -406,5 +427,9 @@
     @endpersist
 
     @fluxScripts
+
+    {{-- Chat widgets and anything that draws on the page: after everything
+         else, so it loads once the page is already readable. --}}
+    {!! \App\Support\CustomCode::bodyEnd() !!}
 </body>
 </html>

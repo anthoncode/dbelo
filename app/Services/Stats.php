@@ -102,6 +102,44 @@ class Stats
         return ['labels' => $labels, 'values' => $values];
     }
 
+    /**
+     * Whether the chart can be believed.
+     *
+     * stats_daily is filled by RollupStatsCommand on an hourly schedule. If
+     * schedule:work is not running — which on a local machine it usually is
+     * not — the table is empty and every series comes back flat. The chart
+     * then draws nothing, or worse draws a truthful-looking line that stops
+     * three weeks ago, and the reader concludes the site has no traffic.
+     *
+     * A missing rollup is completely recoverable and the recovery is one
+     * command, which makes silence the worst possible way to report it.
+     *
+     * IT ONLY SPEAKS WHEN THE CHART WOULD LIE. One day of lag is normal —
+     * the rollup stamps today's row within the hour — and a card that
+     * complained about it every morning would be a card nobody reads by
+     * Thursday.
+     *
+     * @return array{state: string, last: ?string, days: int}
+     */
+    public function rollupStatus(): array
+    {
+        $last = DB::table('stats_daily')->max('day');
+
+        if (! $last) {
+            return ['state' => 'missing', 'last' => null, 'days' => 0];
+        }
+
+        $days = (int) \Illuminate\Support\Carbon::parse($last)
+            ->startOfDay()
+            ->diffInDays(Clock::now()->startOfDay());
+
+        return [
+            'state' => $days >= 2 ? 'stale' : 'ok',
+            'last' => (string) $last,
+            'days' => $days,
+        ];
+    }
+
     // ---------------------------------------------------------------
     // Headline numbers
     // ---------------------------------------------------------------
