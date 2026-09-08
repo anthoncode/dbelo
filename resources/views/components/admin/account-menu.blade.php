@@ -19,9 +19,11 @@
             class="flex items-center gap-2.5 rounded-lg py-1 pl-1 pr-2 transition hover:bg-paper/[0.07]"
             :class="open ? 'bg-paper/[0.07]' : ''">
 
-        <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-brand text-[0.7rem] font-semibold text-white">
-            {{ $user?->initials() }}
-        </span>
+        {{-- Round, and the same component the site header uses. It was a
+             rounded-lg square here and a circle out on the site, which is
+             the starter kit's shape surviving in the one screen nobody
+             compared against the other. --}}
+        <x-user-avatar class="size-8 text-[0.7rem]" />
 
         <span class="hidden min-w-0 text-left md:block">
             <span class="block max-w-[10rem] truncate text-[0.82rem] leading-tight text-paper/85">{{ $user?->name }}</span>
@@ -38,9 +40,17 @@
          class="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-60 overflow-hidden rounded-2xl border border-hairline bg-panel"
          style="box-shadow: 0 20px 60px rgba(0,0,0,.5);">
 
-        <div class="border-b border-hairline px-4 py-3">
-            <div class="truncate text-[0.86rem] text-paper/85">{{ $user?->name }}</div>
-            <div class="truncate text-[0.75rem] text-paper/35">{{ $user?->email }}</div>
+        {{-- The avatar again, larger. The trigger is a 32px mark; when the
+             panel opens under it the eye wants confirmation of WHICH account
+             it just opened, and the email alone in small grey text is not
+             that. The site header does the same thing for the same reason. --}}
+        <div class="flex items-center gap-3 border-b border-hairline px-4 py-3">
+            <x-user-avatar class="size-10 text-[0.9rem]" />
+
+            <div class="min-w-0 flex-1">
+                <div class="truncate text-[0.86rem] leading-tight text-paper/85">{{ $user?->name }}</div>
+                <div class="mt-0.5 truncate text-[0.75rem] leading-tight text-paper/35">{{ $user?->email }}</div>
+            </div>
         </div>
 
         <div class="p-1.5">

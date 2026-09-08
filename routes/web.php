@@ -31,6 +31,40 @@ Route::get('ads.txt', function () {
 | Public catalogue. Everyone can browse and listen; only the download
 | route is gated, and the gate itself lives in DownloadController.
 */
+/*
+| The free audio converter.
+|
+| A PLAIN GET THAT RENDERS A PAGE, and there is deliberately nothing else:
+| no upload route, no temporary disk, no queue, no cleanup, no throttle. The
+| conversion runs in the visitor's browser through WebAssembly, so this
+| server never receives their file.
+|
+| That is what makes the module safe to run anywhere — including on shared
+| hosting, where a public transcoding service would be both technically
+| fragile and, in most terms of service, forbidden.
+|
+| No entry is needed in App\Support\ReservedSlugs: it builds its list from
+| the routes that actually exist, so registering this one already stops a
+| CMS page from being given the slug "converter".
+*/
+Route::get('converter', [\App\Http\Controllers\ConverterController::class, 'index'])
+    ->name('converter');
+
+/*
+| One page per conversion people actually search for.
+|
+| A WHITELIST, NOT A PATTERN. App\Support\ConverterPairs holds twenty pairs
+| and anything else 404s — answering /convert/anything-to-whatever with a
+| generated page is how a site accumulates thousands of near-identical URLs
+| that Google reads as spam rather than as coverage.
+|
+| The segment has a slash in it, so the {page} catch-all at the foot of this
+| file can never swallow it.
+*/
+Route::get('convert/{pair}', [\App\Http\Controllers\ConverterController::class, 'pair'])
+    ->where('pair', '[a-z0-9]+-to-[a-z0-9]+')
+    ->name('converter.pair');
+
 Route::livewire('sounds', 'pages::sounds')->name('sounds.index');
 
 /*

@@ -38,6 +38,17 @@ return [
         // Images from the editor: covers and anything inserted in a post.
         // Public by definition — they are meant to be hotlinked by browsers.
         'media' => env('DBELO_DISK_MEDIA', 'public'),
+
+        /*
+         * Profile pictures.
+         *
+         * This key was already being READ — AnonymiseUser deletes the file
+         * from config('dbelo.storage.avatars', 'public') when an account is
+         * erased — and was missing from this file, so the fallback in that
+         * call was the only thing defining it. A setting that exists only as
+         * a default argument at one call site is a setting nobody can find.
+         */
+        'avatars' => env('DBELO_DISK_AVATARS', 'public'),
     ],
 
     /*

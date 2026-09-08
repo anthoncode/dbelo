@@ -31,7 +31,28 @@
             class="relative grid size-9 shrink-0 place-items-center rounded-lg text-paper/45 transition hover:bg-paper/[0.07] hover:text-paper"
             :class="open ? 'bg-paper/[0.07] text-paper' : ''">
 
-        <x-icon name="bell" :style="$total > 0 ? 'solid' : 'regular'" class="text-[15px]" />
+        {{-- IT RINGS ONLY FOR DANGER, AND ONLY THREE TIMES.
+
+             Both halves of that are the point. A bell that shakes for every
+             notice shakes almost always, and a control that is always moving
+             is wallpaper within a day — the same way a badge that is
+             permanently lit stops being read. So warnings and information
+             get the coloured dot and nothing else; the motion is reserved
+             for the level that means something is actually broken.
+
+             And it stops. Three rings across about six seconds is long
+             enough to catch an eye that was somewhere else and short enough
+             that it is not still twitching while you work. It rings again on
+             the next page — which is correct, because a danger that is still
+             there on the next page is a danger you have not fixed.
+
+             The wrapper exists so the rotation applies to the bell alone.
+             Rotating the button would swing the dot around it, and the
+             reduced-motion rule already in app.css turns all of this off for
+             anybody who asked their system for less movement. --}}
+        <span @class(['grid place-items-center', 'bell-ring' => $worst === $N::DANGER])>
+            <x-icon name="bell" :style="$total > 0 ? 'solid' : 'regular'" class="text-[15px]" />
+        </span>
 
         {{-- The dot, not a number.
 
@@ -41,9 +62,29 @@
              that are both right and never match is how you teach somebody
              that one of them is broken. The dot only says "there is
              something", in the colour of the worst thing. --}}
+        {{-- IT BLINKS UNTIL THE LAST ONE IS GONE. Not three times, not on
+             arrival only — a warning light on a dashboard, on for as long as
+             the condition is true.
+
+             This overrides the usual rule that a permanently lit badge stops
+             being read, and it does so on purpose: the thing that makes a
+             status light ignorable is being lit when nothing is wrong, and
+             this one is not rendered at all when the list is empty. Its
+             presence is already the signal; the blink is what stops it
+             blending into four other static icons.
+
+             Opacity rather than colour or size, and stepped rather than
+             faded, because that is what an indicator lamp does. It also
+             leaves the ring-2 halo alone — Tailwind draws that with a
+             box-shadow, and animating box-shadow here would fight it.
+
+             When it stops at 0.35 instead of 0 it is still legible mid-blink;
+             a dot that vanishes completely reads as a rendering fault. The
+             reduced-motion rule in app.css freezes it fully lit, which is the
+             correct thing for it to fall back to. --}}
         @if ($worst)
             <span @class([
-                'absolute right-1.5 top-1.5 size-2 rounded-full ring-2 ring-canvas',
+                'absolute right-1.5 top-1.5 size-2 rounded-full ring-2 ring-canvas alert-blink',
                 'bg-danger' => $worst === $N::DANGER,
                 'bg-warning' => $worst === $N::WARNING,
                 'bg-info' => $worst === $N::INFO,

@@ -39,6 +39,11 @@
             ['Browse', route('sounds.index'), 'sounds.*'],
             \App\Models\Collection::featured()->exists() ? ['Packs', route('packs.index'), 'packs.*'] : null,
             \App\Models\Post::blogHasPosts() ? ['Blog', route('blog'), 'blog*'] : null,
+            // The converter was reachable only by typing its URL. It is a
+            // page built to bring strangers in, and nothing on the site
+            // pointed at it — which made the twenty pages behind it close to
+            // invisible.
+            ['Converter', route('converter'), 'converter*'],
         ]));
     @endphp
 
@@ -60,7 +65,7 @@
         The 16px of air above the pill is padding on the sticky element, so
         the pill keeps its margin from the viewport edge while stuck.
     --}}
-    <nav x-data="{ mobile: false }" class="sticky top-0 z-50 px-4 pt-4 sm:px-6">
+    <nav class="sticky top-0 z-50 px-4 pt-4 sm:px-6">
         <div class="mx-auto max-w-[1160px] rounded-full bg-surface px-4 py-2.5 shadow-soft-lg transition duration-500 dark:bg-surface-dark">
             <div class="flex items-center gap-3">
 
@@ -79,6 +84,34 @@
                            ])>{{ $label }}</a>
                     @endforeach
                 </div>
+
+                {{-- ══════════════════════════════════════════════════
+                     THE SEARCH
+                     ══════════════════════════════════════════════════
+                     A plain GET form to the catalogue. No JavaScript, no
+                     endpoint of its own, no request per keystroke — Enter
+                     goes to /sounds?q= and the catalogue does what it
+                     already does well.
+
+                     ON MOBILE IT IS THE NAVIGATION. There is no hamburger:
+                     in a library of sound effects nobody browses categories,
+                     everybody types. So the links collapse away below md and
+                     the field takes the room they leave, which is the shape
+                     an app has rather than the shape a website has.
+
+                     Hidden on the catalogue itself, where it would sit two
+                     inches above a second search box that does the same
+                     thing and is the one that actually filters the page. --}}
+                @unless (request()->routeIs('sounds.index'))
+                    <form action="{{ route('sounds.index') }}" method="GET"
+                          class="mx-2 flex min-w-0 flex-1 items-center gap-2 rounded-full bg-ink/[0.05] px-3.5 py-2 transition duration-300 ease-dbelo focus-within:bg-ink/[0.08] md:mx-3 md:max-w-[22rem] dark:bg-paper/[0.07] dark:focus-within:bg-paper/[0.12]">
+                        <x-icon name="magnifying-glass" style="regular" class="shrink-0 text-[0.8rem] text-ink/35 dark:text-paper/35" />
+                        <input type="search" name="q" value="{{ request('q') }}"
+                               placeholder="Search sounds…"
+                               aria-label="Search sounds"
+                               class="w-full min-w-0 border-0 bg-transparent p-0 text-[0.86rem] text-ink placeholder:text-ink/35 focus:outline-none focus:ring-0 dark:text-paper dark:placeholder:text-paper/35" />
+                    </form>
+                @endunless
 
                 <div class="ml-auto flex items-center gap-2">
 
@@ -101,9 +134,7 @@
 
                             <button type="button" x-on:click="open = ! open" :aria-expanded="open"
                                     class="flex items-center gap-2 rounded-full py-1 pl-1 pr-2.5 transition duration-300 ease-dbelo hover:bg-ink/[0.06] dark:hover:bg-paper/10">
-                                <span class="grid size-8 shrink-0 place-items-center rounded-full bg-brand text-[0.8rem] font-semibold text-white">
-                                    {{ Str::upper(Str::substr(auth()->user()->name, 0, 1)) }}
-                                </span>
+                                <x-user-avatar class="size-8 text-[0.8rem]" />
                                 <x-icon name="chevron-down" style="solid" class="text-[0.6rem] text-ink/40 dark:text-paper/40" />
                             </button>
 
@@ -128,9 +159,7 @@
                                  class="absolute right-0 z-50 mt-2.5 w-72 origin-top-right overflow-hidden rounded-card bg-surface p-2 shadow-soft-lg dark:bg-surface-dark">
 
                                 <div class="flex items-center gap-3 px-2.5 pb-3 pt-2">
-                                    <span class="grid size-10 shrink-0 place-items-center rounded-full bg-brand text-[0.95rem] font-semibold text-white">
-                                        {{ Str::upper(Str::substr(auth()->user()->name, 0, 1)) }}
-                                    </span>
+                                    <x-user-avatar class="size-10 text-[0.95rem]" />
 
                                     <div class="min-w-0 flex-1">
                                         <div class="truncate text-[0.9rem] font-medium leading-tight">{{ auth()->user()->name }}</div>
@@ -195,108 +224,156 @@
                             </div>
                         </div>
                     @else
+                        {{-- Two words each, and on a phone there is room for
+                             neither. Below sm they become one icon that goes
+                             to sign-in — the door is still there, it is just
+                             the size a door is in an app. --}}
                         <a href="{{ route('login') }}" wire:navigate
-                           class="rounded-full px-4 py-2 text-sm text-ink/60 transition duration-300 ease-dbelo hover:bg-ink/[0.06] hover:text-ink dark:text-paper/60 dark:hover:bg-paper/10 dark:hover:text-paper">
+                           class="hidden rounded-full px-4 py-2 text-sm text-ink/60 transition duration-300 ease-dbelo hover:bg-ink/[0.06] hover:text-ink sm:block dark:text-paper/60 dark:hover:bg-paper/10 dark:hover:text-paper">
                             Log in
                         </a>
 
                         <a href="{{ route('register') }}" wire:navigate
-                           class="rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-white shadow-brand transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:shadow-brand-lg">
+                           class="hidden rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-white shadow-brand transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:shadow-brand-lg sm:block">
                             Sign up
+                        </a>
+
+                        <a href="{{ route('login') }}" wire:navigate aria-label="Log in"
+                           class="grid size-9 shrink-0 place-items-center rounded-full bg-brand text-white transition duration-300 ease-dbelo sm:hidden">
+                            <x-icon name="user" style="solid" class="text-[0.82rem]" />
                         </a>
                     @endauth
 
                     {{--
-                        Light · dark · system — THREE states, not two.
+                        SUN or MOON. Two states, and the third is gone.
 
-                        Two was a bug, not a simplification. Flux starts every
-                        visitor on "system", which is what makes a computer go
-                        dark on its own at nightfall. A two-way toggle can only
-                        write "light" or "dark", so the first click pinned the
-                        site to one of them forever and that behaviour was
-                        gone with no way back. The third stop is how you give
-                        it back.
+                        It used to cycle light -> dark -> system, and the
+                        third stop was defended here as the only way back to
+                        "follow my Mac" once you had pinned a choice. That
+                        reasoning was right and the control was still wrong:
+                        on a Mac already in dark mode, "system" and "dark"
+                        render IDENTICALLY - same background, a 13px icon the
+                        only difference - so one click in three appeared to
+                        do nothing at all.
 
-                        Driven through $flux.appearance because
-                        @fluxAppearance in the head is what applies the class
-                        BEFORE first paint — a second mechanism here would be
-                        two things fighting over one class, and a white flash
-                        on every load.
+                        A switch that has to be explained is a broken switch,
+                        and this one got asked about twice. Following the
+                        system now lives in account settings, where things
+                        are configured; the bar gets a light switch.
 
-                        The state is mirrored locally rather than read from
-                        $flux on every render: a local value is reactive for
-                        certain, and this button is the only thing that writes
-                        it besides the settings page.
+                        THE ICON IS THE DESTINATION, not the current state.
+                        In daylight it shows the moon, meaning "press for
+                        night". Both conventions exist and neither is
+                        obviously right - this is the one somebody expects
+                        when they ask "why is it not showing the night icon
+                        during the day".
+
+                        Everything lives in x-data methods rather than in the
+                        click expression, and that is not style. Alpine
+                        compiles an x-on expression into `__self.result =
+                        <expr>`, so a `const` or a `try` at that level is a
+                        syntax error and Alpine then discards the handler
+                        silently - the button just stops responding, with
+                        nothing in the console pointing at why. Inside a
+                        method body those are ordinary statements again.
                     --}}
                     <button type="button"
-                            x-data="{ mode: 'system', flash: false }"
-                            x-init="mode = ($flux.appearance || 'system')"
-                            x-on:click="
-                                mode = mode === 'light' ? 'dark' : (mode === 'dark' ? 'system' : 'light');
-                                $flux.appearance = mode;
+                            x-data="{
+                                mode: 'light',
+                                flash: false,
 
-                                /* Retrigger the wash: an animation only replays
-                                   if the class actually leaves the element. */
-                                flash = false;
-                                $nextTick(() => flash = true);
-                                setTimeout(() => flash = false, 700);
-                            "
-                            :title="mode === 'light' ? 'Light — click for dark'
-                                    : mode === 'dark' ? 'Dark — click to follow your system'
-                                    : 'Following your system — click for light'"
-                            :aria-label="'Theme: ' + mode"
+                                init() {
+                                    this.sync();
+
+                                    /* Somebody still on `system` should see the
+                                       icon follow their Mac at sunset rather
+                                       than go stale until the next reload. */
+                                    window.matchMedia('(prefers-color-scheme: dark)')
+                                        .addEventListener('change', () => {
+                                            if (!this.$flux || (this.$flux.appearance || 'system') === 'system') this.sync();
+                                        });
+                                },
+
+                                /* What the page is ACTUALLY showing right now,
+                                   which for an untouched visitor is whatever
+                                   their system says. */
+                                sync() {
+                                    const pref = (this.$flux && this.$flux.appearance) || 'system';
+
+                                    this.mode = pref === 'system'
+                                        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+                                        : pref;
+                                },
+
+                                toggle() {
+                                    const next = this.mode === 'dark' ? 'light' : 'dark';
+                                    const root = document.documentElement;
+                                    const release = () => root.classList.remove('theme-switching');
+
+                                    /* Colours must snap, not cross-fade. See
+                                       .theme-switching in app.css. Released by
+                                       two routes because requestAnimationFrame
+                                       is frozen in a background tab, and while
+                                       that class is stuck every transition on
+                                       the site is dead. */
+                                    root.classList.add('theme-switching');
+                                    requestAnimationFrame(() => requestAnimationFrame(release));
+                                    setTimeout(release, 300);
+
+                                    this.mode = next;
+                                    if (this.$flux) this.$flux.appearance = next;
+
+                                    /* Retrigger the wash: an animation only
+                                       replays if the class actually leaves. */
+                                    this.flash = false;
+                                    this.$nextTick(() => this.flash = true);
+                                    setTimeout(() => this.flash = false, 700);
+                                },
+                            }"
+                            x-on:click="toggle()"
+                            :title="mode === 'dark' ? 'Switch to light' : 'Switch to dark'"
+                            :aria-label="mode === 'dark' ? 'Switch to light' : 'Switch to dark'"
                             class="relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-full bg-ink/[0.05] text-ink/55 transition duration-300 ease-dbelo hover:bg-ink/[0.10] hover:text-ink dark:bg-paper/10 dark:text-paper/60 dark:hover:bg-paper/[0.16] dark:hover:text-paper">
 
                         {{-- Nightfall.
 
                              A wash of colour expands from the middle of the
-                             button and fades: warm amber on the way to light,
-                             cold blue on the way to dark. It lasts 700ms and
-                             leaves nothing behind — the point is to make the
-                             switch feel like something happened rather than
-                             like an icon being swapped out. --}}
+                             button and fades: cold blue on the way to dark,
+                             warm amber on the way to light. 700ms, leaving
+                             nothing behind - it makes the switch feel like
+                             something happened rather than like an icon being
+                             swapped out. --}}
                         <span class="pointer-events-none absolute inset-0 rounded-full opacity-0"
-                              :class="flash && ('nightfall ' + (
-                                  mode === 'dark'  ? 'nightfall-night'
-                                : mode === 'light' ? 'nightfall-day'
-                                :                    'nightfall-auto'
-                              ))"></span>
+                              :class="flash && ('nightfall ' + (mode === 'dark' ? 'nightfall-night' : 'nightfall-day'))"></span>
 
-                        {{-- The sun SINKS and the night comes down from above,
-                             which is the direction the real thing moves.
-                             Three icons stacked and cross-faded rather than
-                             one swapped: a swap is instant and reads as a
-                             glitch, this reads as time passing. --}}
-                        <span class="absolute transition-all duration-500 ease-dbelo"
-                              :class="mode === 'light' ? 'translate-y-0 rotate-0 opacity-100' : 'translate-y-5 -rotate-90 opacity-0'">
-                            <x-icon name="sun" style="solid" class="text-[0.85rem]" />
-                        </span>
-
-                        <span class="absolute transition-all duration-500 ease-dbelo"
-                              :class="mode === 'dark' ? 'translate-y-0 rotate-0 opacity-100' : '-translate-y-5 rotate-90 opacity-0'">
+                        {{-- The moon comes down from above and the sun rises
+                             from below, which is the direction the real ones
+                             move. 200ms: long enough to read as motion, short
+                             enough that the button has already answered. --}}
+                        <span class="absolute transition-all duration-200 ease-dbelo"
+                              :class="mode === 'light' ? 'translate-y-0 rotate-0 opacity-100' : '-translate-y-5 rotate-90 opacity-0'">
                             <x-icon name="moon" style="solid" class="text-[0.85rem]" />
                         </span>
 
-                        <span class="absolute transition-all duration-500 ease-dbelo"
-                              :class="mode === 'system' ? 'scale-100 opacity-100' : 'scale-0 opacity-0'">
-                            <x-icon name="circle-half-stroke" style="solid" class="text-[0.85rem]" />
+                        <span class="absolute transition-all duration-200 ease-dbelo"
+                              :class="mode === 'dark' ? 'translate-y-0 rotate-0 opacity-100' : 'translate-y-5 -rotate-90 opacity-0'">
+                            <x-icon name="sun" style="solid" class="text-[0.85rem]" />
                         </span>
                     </button>
 
-                    <button type="button" x-on:click="mobile = ! mobile" aria-label="Menu"
-                            class="grid size-9 shrink-0 place-items-center rounded-full bg-ink/[0.05] text-ink/55 transition duration-300 ease-dbelo md:hidden dark:bg-paper/10 dark:text-paper/60">
-                        <x-icon name="bars" style="solid" class="text-[0.85rem]" />
-                    </button>
-                </div>
-            </div>
+                    {{-- THE HAMBURGER IS GONE, and so is the panel it
+                         opened. Below md the bar is the favicon, the search,
+                         one account icon and the theme — the four things a
+                         phone app puts in a header.
 
-            <div x-show="mobile" style="display: none" x-transition.opacity.duration.200ms class="mt-2 space-y-1 px-1 pb-2 md:hidden">
-                @foreach ($navLinks as [$label, $href, $pattern])
-                    <a href="{{ $href }}" wire:navigate x-on:click="mobile = false"
-                       class="block rounded-control px-4 py-2.5 text-[0.9rem] transition duration-200 ease-dbelo hover:bg-ink/[0.05] dark:hover:bg-paper/[0.08]">
-                        {{ $label }}
-                    </a>
-                @endforeach
+                         What it costs: Browse, Packs, Blog and Converter are
+                         not in the bar on a phone. They are in the footer,
+                         which is a real demotion and worth having said out
+                         loud. The trade is that the search — the thing
+                         everybody actually uses on a sound library — gets the
+                         width instead of a menu button that hides four links
+                         behind a tap. --}}
+                </div>
             </div>
         </div>
     </nav>
@@ -322,7 +399,20 @@
                  not, on the same page. --}}
             <span>&copy; {{ date('Y') }} {{ config('app.name', 'dbelo') }} — sound effects library</span>
 
+            {{-- Where the navigation went.
+
+                 These four leave the bar below md, so the footer is now the
+                 only place a phone can reach Packs, the Blog or the
+                 converter. That makes it navigation rather than decoration,
+                 and it is listed first for the same reason. --}}
             <nav class="flex flex-wrap gap-5">
+                @foreach ($navLinks as [$label, $href, $pattern])
+                    <a href="{{ $href }}" wire:navigate
+                       class="font-medium text-ink/60 transition hover:text-brand dark:text-paper/60">{{ $label }}</a>
+                @endforeach
+
+                <span class="hidden text-ink/15 sm:inline dark:text-paper/15">·</span>
+
                 <a href="{{ route('legal.licenses') }}" wire:navigate class="transition hover:text-brand">Licenses</a>
                 <a href="{{ route('legal.terms') }}" wire:navigate class="transition hover:text-brand">Terms</a>
                 <a href="{{ route('legal.privacy') }}" wire:navigate class="transition hover:text-brand">Privacy</a>

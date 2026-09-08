@@ -11,6 +11,20 @@ export default defineConfig({
                 'resources/css/app.css',
                 'resources/js/app.js',
                 'resources/js/passkeys.js',
+
+                /*
+                 * Its own entry, NOT part of app.js.
+                 *
+                 * app.js is loaded on every page of the public site, and
+                 * nothing outside /converter needs ffmpeg. Folding it in
+                 * would put the wrapper — and its import graph — in front
+                 * of every visitor reading a blog post.
+                 *
+                 * The 30 MB wasm core is not bundled by this entry either:
+                 * it is fetched at runtime from public/vendor/ffmpeg, and
+                 * only after the visitor picks a file.
+                 */
+                'resources/js/converter.js',
             ],
             refresh: true,
 

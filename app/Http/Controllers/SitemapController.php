@@ -59,6 +59,29 @@ class SitemapController extends Controller
                     ]);
                 });
 
+            /*
+             * The converter, and its per-pair pages.
+             *
+             * These are static — a whitelist in App\Support\ConverterPairs,
+             * not rows in a table — so they never change and never need a
+             * lastmod. They earn a high priority because they are the only
+             * pages on this site written to rank for something other than
+             * the catalogue, and a page Google cannot see cannot do that.
+             */
+            $urls->push([
+                'loc' => route('converter'),
+                'changefreq' => 'monthly',
+                'priority' => '0.8',
+            ]);
+
+            foreach (\App\Support\ConverterPairs::slugs() as $pair) {
+                $urls->push([
+                    'loc' => route('converter.pair', $pair),
+                    'changefreq' => 'monthly',
+                    'priority' => '0.7',
+                ]);
+            }
+
             if (Post::posts()->live()->exists()) {
                 $urls->push([
                     'loc' => route('blog'),

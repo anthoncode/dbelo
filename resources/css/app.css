@@ -206,6 +206,26 @@ select:focus[data-flux-control] {
    because a transition back to the resting state is visible — the element
    would shrink and brighten again on the way out. An animation ends where
    it ends. */
+/*
+ * SWITCHING THEME MUST BE INSTANT.
+ *
+ * Every element carrying a `transition` cross-fades its colours when the
+ * `dark` class flips - the nav pill over half a second, eleven other things
+ * over a third of one, and every card on the page besides. Nobody asked for
+ * that: it is a side effect of transitions written for hover states, and it
+ * makes a button that should feel like a light switch feel like a dimmer.
+ *
+ * This class is present for exactly one frame around the flip, so the
+ * colours snap. It kills TRANSITIONS only - the nightfall wash is an
+ * animation and survives, which is the point: the deliberate feedback stays
+ * and the accidental lag goes.
+ */
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+    transition: none !important;
+}
+
 @keyframes dbelo-nightfall {
     from { transform: scale(0.35); opacity: 0.9; }
     to   { transform: scale(2.4);  opacity: 0; }
@@ -223,7 +243,47 @@ select:focus[data-flux-control] {
    These two live here and are used nowhere else. */
 .nightfall-day   { --nightfall-tint: rgb(253 200 88 / 0.75); }
 .nightfall-night { --nightfall-tint: rgb(92 82 210 / 0.75); }
-.nightfall-auto  { --nightfall-tint: rgb(148 163 184 / 0.60); }
+
+/* ── The bell in the admin bar, when something is actually broken ──────
+   Roughly a second of ringing then a second and a half of rest, three
+   times, and then it is still. The rest between rings is deliberate: a
+   continuous shake reads as a broken animation, while a pause and a second
+   ring reads as something trying to get your attention.
+   Only App\Support\Notices::DANGER gets this — see the note in
+   notice-bell.blade.php for why warnings do not. */
+@keyframes dbelo-bell-ring {
+    0%   { transform: rotate(0); }
+    6%   { transform: rotate(15deg); }
+    12%  { transform: rotate(-13deg); }
+    18%  { transform: rotate(10deg); }
+    24%  { transform: rotate(-8deg); }
+    30%  { transform: rotate(5deg); }
+    36%  { transform: rotate(-3deg); }
+    42%  { transform: rotate(0); }
+    100% { transform: rotate(0); }
+}
+
+/* Pivoting near the top is what makes it read as a bell hanging from its
+   crown rather than a shape spinning about its middle. */
+.bell-ring {
+    transform-origin: 50% 15%;
+    animation: dbelo-bell-ring 2.2s var(--ease-dbelo) 3;
+}
+
+/* ── The alert lamp on the bell ────────────────────────────────────────
+   Blinks for as long as anything is open, in the colour of the worst of
+   them. steps(1, end) is what makes it a lamp and not a pulse: it snaps
+   between the two values instead of easing, the way an indicator light
+   does. The "off" state is dim rather than absent so the dot never looks
+   like it failed to render. */
+@keyframes dbelo-alert-blink {
+    0%,  49%  { opacity: 1; }
+    50%, 100% { opacity: 0.35; }
+}
+
+.alert-blink {
+    animation: dbelo-alert-blink 1.4s steps(1, end) infinite;
+}
 
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {

@@ -49,8 +49,15 @@ new #[Layout('layouts.admin')] #[Title('Appearance')] class extends Component {
             // route entirely.
             'values.brand_color' => ['nullable', 'regex:/^#[0-9a-fA-F]{6}$/'],
             'values.action_color' => ['nullable', 'regex:/^#[0-9a-fA-F]{6}$/'],
+
+            // Capped because it is set over an image in a column about
+            // 480px wide. Past roughly eighty characters it stops being a
+            // headline and starts being a paragraph in headline type,
+            // which wraps into the picture and reads badly.
+            'values.login_title' => ['nullable', 'string', 'max:80'],
         ], [
             'values.*.regex' => 'Use a six-digit hex colour, like #a32eb7.',
+            'values.login_title.max' => 'Keep the headline under 80 characters — it is one line over a picture.',
         ]);
 
         $before = Setting::cached();
@@ -61,10 +68,26 @@ new #[Layout('layouts.admin')] #[Title('Appearance')] class extends Component {
                 continue;
             }
 
-            $new = strtolower(trim((string) ($this->values[$field] ?? '')));
+            $new = trim((string) ($this->values[$field] ?? ''));
             $old = (string) ($before[$meta['key']] ?? '');
+            $default = Appearance::defaultValue($field);
 
-            if ($new === strtolower(Appearance::defaultValue($field))) {
+            /*
+             * Case-folding belongs to colours and to nothing else.
+             *
+             * #A32EB7 and #a32eb7 are one value and should not read as a
+             * change, so both sides are lowered before comparing. A
+             * headline is prose: lowering it would quietly turn "New in
+             * dbelo" into "new in dbelo" on the way to the database, and
+             * the admin would retype the capital every save and watch it
+             * vanish again with nothing explaining why.
+             */
+            if ($meta['type'] === 'color') {
+                $new = strtolower($new);
+                $default = strtolower($default);
+            }
+
+            if ($new === $default) {
                 $new = '';
             }
 
@@ -105,11 +128,18 @@ new #[Layout('layouts.admin')] #[Title('Appearance')] class extends Component {
                 continue;
             }
 
+            $maxKb = $this->maxKb($field);
+            $maxLabel = $this->humanKb($maxKb);
+
             $this->validate([
-                "files.{$field}" => ['required', 'file', 'max:2048', 'mimes:svg,png,jpg,jpeg,webp'],
+                "files.{$field}" => ['required', 'file', "max:{$maxKb}", 'mimes:svg,png,jpg,jpeg,webp'],
             ], [
                 'files.*.mimes' => 'SVG, PNG, JPG or WEBP.',
-                'files.*.max' => 'Keep it under 2 MB — this loads on every page.',
+                'files.*.max' => $this->serverIsTheLimit($field)
+                    ? "This server accepts at most {$maxLabel} per upload — that is PHP's own limit, not this screen's."
+                    : ($field === 'login_image'
+                        ? "Keep it under {$maxLabel}. A photo that big is worth compressing anyway — it is the first thing somebody signing in waits for."
+                        : "Keep it under {$maxLabel} — this loads on every page."),
             ]);
 
             if (! $this->svgIsSafe($file)) {
@@ -184,6 +214,90 @@ new #[Layout('layouts.admin')] #[Title('Appearance')] class extends Component {
         $contents = rescue(fn () => (string) file_get_contents($file->getRealPath()), '', false);
 
         return ! preg_match('/<script|javascript:|\son\w+\s*=|<foreignObject/i', $contents);
+    }
+
+    /* ═══════════════════════ How big a file may be ═══════════════════════ */
+
+    /*
+     * WHY THIS IS COMPUTED AND NOT A NUMBER.
+     *
+     * A file larger than PHP's own upload_max_filesize or post_max_size
+     * never reaches Laravel. PHP discards the body, the validator never
+     * runs, and Livewire can only report "failed to upload" — no size, no
+     * setting, no way for the person staring at it to know that the file
+     * was the problem rather than the uploader.
+     *
+     * So this screen refuses to state a limit it cannot keep. It asks the
+     * server what it will actually accept and shows the smaller of that and
+     * what the field wants, which turns an unexplained failure into a
+     * number somebody can read before choosing a file.
+     */
+
+    /** "8M", "512K", "2G" → bytes. 0 means unset or unlimited. */
+    private static function iniBytes(string $key): int
+    {
+        $raw = strtolower(trim((string) ini_get($key)));
+
+        if ($raw === '' || $raw === '0' || $raw === '-1') {
+            return 0;
+        }
+
+        $n = (int) $raw;
+
+        return match (substr($raw, -1)) {
+            'g' => $n * 1024 * 1024 * 1024,
+            'm' => $n * 1024 * 1024,
+            'k' => $n * 1024,
+            default => $n,
+        };
+    }
+
+    /** What the field would like to allow, before the server has a say. */
+    public function wantedKb(string $field): int
+    {
+        // A logo is a small flat file that loads on every page, so 2 MB is
+        // already generous. The login picture is a photograph, it loads on
+        // two pages, and it is the one field where a straight-off-the-camera
+        // JPEG is the normal thing to upload.
+        return $field === 'login_image' ? 4096 : 2048;
+    }
+
+    /** The largest upload this server will accept at all, in KB. */
+    public function serverCeilingKb(): int
+    {
+        /*
+         * Livewire's own cap on a temporary upload when no
+         * config/livewire.php has been published. It does not bind at 2 and
+         * 4 MB, but it would the moment a field asked for more — and being
+         * stopped by an invisible framework default is exactly the failure
+         * this method exists to prevent.
+         */
+        $ceiling = 12288;
+
+        $limits = array_filter([
+            self::iniBytes('upload_max_filesize'),
+            self::iniBytes('post_max_size'),
+        ]);
+
+        return $limits === [] ? $ceiling : min($ceiling, intdiv(min($limits), 1024));
+    }
+
+    public function maxKb(string $field): int
+    {
+        return min($this->wantedKb($field), $this->serverCeilingKb());
+    }
+
+    /** True when the server, and not this screen, is what decides. */
+    public function serverIsTheLimit(string $field): bool
+    {
+        return $this->serverCeilingKb() < $this->wantedKb($field);
+    }
+
+    public function humanKb(int $kb): string
+    {
+        return $kb >= 1024
+            ? rtrim(rtrim(number_format($kb / 1024, 1), '0'), '.').' MB'
+            : $kb.' KB';
     }
 
     /* ═════════════════════════════ Helpers ═════════════════════════════ */
@@ -287,7 +401,11 @@ new #[Layout('layouts.admin')] #[Title('Appearance')] class extends Component {
                                                 @endif
                                             </div>
 
-                                            <div class="min-w-0 flex-1 space-y-2">
+                                            <div class="min-w-0 flex-1 space-y-2"
+                                                 x-data="{ failed: false }"
+                                                 x-on:livewire-upload-start="failed = false"
+                                                 x-on:livewire-upload-error="failed = true">
+
                                                 <input type="file" wire:model="files.{{ $field }}"
                                                        accept=".svg,.png,.jpg,.jpeg,.webp"
                                                        class="block w-full text-[0.8rem] text-paper/50 file:mr-3 file:rounded-lg file:border-0 file:bg-raised file:px-3.5 file:py-2 file:text-[0.8rem] file:text-paper/70 hover:file:bg-brand hover:file:text-white" />
@@ -296,12 +414,63 @@ new #[Layout('layouts.admin')] #[Title('Appearance')] class extends Component {
                                                     Uploading…
                                                 </div>
 
+                                                {{-- Stated before anything is chosen. A file over PHP's
+                                                     own limit is discarded by the server before Laravel
+                                                     sees it, so the validation message below can never
+                                                     fire for that case — this line is the only warning
+                                                     that arrives in time to be useful. --}}
+                                                <p class="text-[0.74rem] {{ $this->serverIsTheLimit($field) ? 'text-warning' : 'text-paper/30' }}">
+                                                    @if ($this->serverIsTheLimit($field))
+                                                        Up to {{ $this->humanKb($this->maxKb($field)) }} — this is your
+                                                        <span class="font-mono">php.ini</span> limit, not this screen's.
+                                                    @else
+                                                        Up to {{ $this->humanKb($this->maxKb($field)) }}.
+                                                    @endif
+                                                </p>
+
+                                                {{-- The failure Livewire cannot describe.
+
+                                                     When PHP rejects the request body there is no
+                                                     validation error to show, only "failed to upload" —
+                                                     which says that something went wrong and nothing
+                                                     about what. This replaces it with the cause and the
+                                                     name of the setting to change. --}}
+                                                <p x-show="failed" style="display: none"
+                                                   class="rounded-lg border border-danger/25 bg-danger/[0.06] px-3 py-2 text-[0.78rem] leading-relaxed text-danger">
+                                                    The server refused the file before Laravel saw it, so nothing was
+                                                    validated. Almost always the file is over PHP's
+                                                    <span class="font-mono">upload_max_filesize</span> or
+                                                    <span class="font-mono">post_max_size</span>. This server currently
+                                                    accepts <strong>{{ $this->humanKb($this->serverCeilingKb()) }}</strong> per upload.
+                                                </p>
+
                                                 @if ($this->url($field))
                                                     <button type="button" wire:click="removeImage('{{ $field }}')"
                                                             class="text-[0.78rem] text-paper/35 underline-offset-2 transition hover:text-danger hover:underline">
                                                         Remove
                                                     </button>
                                                 @endif
+                                            </div>
+                                        </div>
+
+                                    @elseif ($meta['type'] === 'text')
+                                        {{-- The counter is not decoration. maxlength
+                                             alone just stops accepting keystrokes at
+                                             the limit, which feels like a broken
+                                             keyboard; the count turns that into a
+                                             rule somebody can see coming. It turns
+                                             amber over 70 for the same reason. --}}
+                                        <div x-data="{ n: {{ strlen((string) ($this->values[$field] ?? '')) }} }" class="space-y-1.5">
+                                            <input type="text"
+                                                   wire:model="values.{{ $field }}"
+                                                   x-on:input="n = $event.target.value.length"
+                                                   maxlength="80"
+                                                   placeholder="New this week on dbelo"
+                                                   class="w-full max-w-[46ch] rounded-lg border-0 bg-raised px-3 py-2.5 text-[0.86rem] focus:outline-none focus:ring-1 focus:ring-brand" />
+
+                                            <div class="text-[0.74rem] tabular-nums"
+                                                 :class="n > 70 ? 'text-warning' : 'text-paper/30'">
+                                                <span x-text="n"></span>/80
                                             </div>
                                         </div>
 

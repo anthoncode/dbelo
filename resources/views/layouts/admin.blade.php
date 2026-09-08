@@ -64,12 +64,52 @@
              a chevron, and keeping a second copy of them here would have
              been two controls opening one profile — the same duplication
              the email screen was corrected for. --}}
-        <div class="flex h-[60px] shrink-0 items-center border-b border-hairline px-3">
+        @php
+            /*
+             * THE DARK LOGO, not the light one. This panel is pinned to dark
+             * by class="dark" on <html>, so logo_light would be whatever mark
+             * was drawn for a white page sitting on a near-black rail.
+             * logoDark() falls back to the light file by itself, which is the
+             * right answer for a mark that reads on both.
+             */
+            $adminLogo = \App\Support\Appearance::logoDark();
+            $adminFavicon = \App\Support\Appearance::url('favicon');
+        @endphp
+
+        {{-- THE MARK AND THE COLLAPSE CONTROL, and nothing else.
+
+             The name in text is gone. It said "dbelo" next to a logo that
+             also says "dbelo", which is the word twice — and once there is a
+             real uploaded mark, the wordmark is usually already inside it.
+
+             Full logo expanded, favicon collapsed. Those are two different
+             images for two different widths, not one image scaled: a
+             wordmark squeezed into 28px is unreadable, and a favicon
+             stretched across 200px is a smudge.
+
+             The padding tightens when collapsed because the rail is 76px and
+             the two controls have to fit inside it. px-3 leaves 52px for a
+             28px mark and a 24px button; px-2 leaves 60px, which is the
+             same two controls with four pixels to breathe. --}}
+        <div class="flex h-[60px] shrink-0 items-center border-b border-hairline"
+             :class="collapsed ? 'gap-1 px-2' : 'gap-2 px-3'">
+
+            {{-- ── Expanded: the full mark ── --}}
             <a href="{{ route('admin.dashboard') }}" wire:navigate
                x-show="! collapsed" x-cloak
-               class="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-1.5 transition hover:bg-paper/[0.05]">
-                <span class="grid size-7 shrink-0 place-items-center rounded-lg bg-brand text-[0.7rem] font-bold text-white">d</span>
-                <span class="min-w-0 flex-1 truncate text-[0.9rem] font-medium">{{ config('app.name', 'dbelo') }}</span>
+               aria-label="{{ config('app.name', 'dbelo') }}"
+               class="flex min-w-0 flex-1 items-center rounded-lg px-2 py-1.5 transition hover:bg-paper/[0.05]">
+                @if ($adminLogo)
+                    <img src="{{ $adminLogo }}" alt="{{ config('app.name', 'dbelo') }}"
+                         class="h-7 w-auto max-w-[160px] object-contain object-left" />
+                @else
+                    {{-- No logo uploaded. The same waveform tile x-site-logo
+                         falls back to, so the panel and the site cannot show
+                         two different marks for the same missing file. --}}
+                    <span class="grid size-8 shrink-0 place-items-center rounded-[9px] bg-brand">
+                        <x-icon name="waveform-lines" style="solid" class="text-[13px] text-white" />
+                    </span>
+                @endif
             </a>
 
             <button type="button" x-show="! collapsed" x-cloak @click="collapsed = true"
@@ -78,10 +118,31 @@
                 <x-icon name="chevrons-left" style="regular" class="text-[12px]" />
             </button>
 
+            {{-- ── Collapsed: the favicon ──
+
+                 Still a link to the dashboard, and the chevron beside it is
+                 still only the collapse toggle. Making the mark itself expand
+                 the rail would be cheaper in pixels and would give one
+                 control two meanings depending on a state you cannot see
+                 from the control. --}}
+            <a href="{{ route('admin.dashboard') }}" wire:navigate
+               x-show="collapsed" x-cloak
+               aria-label="{{ config('app.name', 'dbelo') }}"
+               class="grid size-7 shrink-0 place-items-center overflow-hidden rounded-[8px] transition hover:opacity-80">
+                @if ($adminFavicon)
+                    <img src="{{ $adminFavicon }}" alt="{{ config('app.name', 'dbelo') }}"
+                         class="size-7 object-contain" />
+                @else
+                    <span class="grid size-7 place-items-center rounded-[8px] bg-brand">
+                        <x-icon name="waveform-lines" style="solid" class="text-[12px] text-white" />
+                    </span>
+                @endif
+            </a>
+
             <button type="button" x-show="collapsed" x-cloak @click="collapsed = false"
-                    class="grid h-8 w-full place-items-center rounded-lg text-paper/30 transition hover:bg-paper/10 hover:text-paper/70"
+                    class="grid size-6 shrink-0 place-items-center rounded-lg text-paper/30 transition hover:bg-paper/10 hover:text-paper/70"
                     title="Expand">
-                <x-icon name="chevrons-right" style="regular" class="text-[12px]" />
+                <x-icon name="chevrons-right" style="regular" class="text-[11px]" />
             </button>
         </div>
 
@@ -149,10 +210,20 @@
         <header class="flex h-[60px] shrink-0 items-center gap-4 border-b border-hairline px-6">
             <h1 class="min-w-0 truncate text-[0.98rem] font-medium">{{ $title ?? 'Dashboard' }}</h1>
 
+            {{-- Beside the title, not among the icons on the right. It is
+                 not a control you operate, it is a fact about what you are
+                 looking at — the same reason it sits next to the page name
+                 rather than next to the bell. --}}
+            <x-admin.site-status-pill />
+
             <div class="ml-auto flex items-center gap-2">
                 @isset($actions)
                     <div class="mr-1 flex items-center gap-3">{{ $actions }}</div>
                 @endisset
+
+                {{-- First in the cluster: it is the only one here that
+                     makes something, and the rest are ways of looking. --}}
+                <x-admin.quick-create />
 
                 <x-admin.command-palette />
 

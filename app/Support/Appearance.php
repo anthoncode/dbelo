@@ -8,7 +8,8 @@ use Illuminate\Support\HtmlString;
 use Throwable;
 
 /**
- * What the site looks like: its marks, and the two colours that are its own.
+ * What the site looks like: its marks, the panel beside the sign-in form,
+ * and the two colours that are its own.
  *
  * THE HARD CONSTRAINT, and the thing that decides the whole design of this
  * screen: Tailwind compiles at BUILD time. A colour chosen in the panel can
@@ -71,6 +72,21 @@ class Appearance
             'help' => 'The picture that appears when a link to the site is pasted into WhatsApp, Slack or X. 1200×630 is the size every platform crops from.',
         ],
 
+        /* ═══════════════════════════ The login page ═══════════════════════════ */
+
+        'login_image' => [
+            'key' => 'appearance.login_image',
+            'type' => 'image',
+            'label' => 'Login image',
+            'help' => 'The picture beside the sign-in form on Log in and Sign up. Shown from 1024px up only — on a phone the form takes the whole screen and the panel is not rendered at all. Portrait or square works best; about 1200px on the short side. Without one the panel is a brand gradient.',
+        ],
+        'login_title' => [
+            'key' => 'appearance.login_title',
+            'type' => 'text',
+            'label' => 'Login headline',
+            'help' => 'One line over that image — a release, a new pack, whatever is worth saying to somebody who is signing in. Up to 80 characters. Leave it empty and the panel is just the picture.',
+        ],
+
         /* ═══════════════════════════ The colours ═══════════════════════════ */
 
         'brand_color' => [
@@ -95,6 +111,11 @@ class Appearance
             'label' => 'Marks',
             'note' => 'The images that stand for the site. All four are optional; each falls back to what is built in.',
             'fields' => ['logo_light', 'logo_dark', 'favicon', 'social_image'],
+        ],
+        'login' => [
+            'label' => 'Login page',
+            'note' => 'What sits beside the sign-in form on Log in and Sign up. Desktop only, on purpose: on a phone the form has the screen to itself, because somebody who came to sign in should not have to scroll past a picture to do it.',
+            'fields' => ['login_image', 'login_title'],
         ],
         'colours' => [
             'label' => 'Colours',
