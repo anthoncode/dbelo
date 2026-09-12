@@ -1,20 +1,94 @@
-<div class="flex items-start max-md:flex-col">
-    <div class="me-10 w-full pb-4 md:w-[220px]">
-        <flux:navlist aria-label="{{ __('Settings') }}">
-            <flux:navlist.item :href="route('profile.edit')" wire:navigate>{{ __('Profile') }}</flux:navlist.item>
-            <flux:navlist.item :href="route('security.edit')" wire:navigate>{{ __('Security') }}</flux:navlist.item>
-            <flux:navlist.item :href="route('appearance.edit')" wire:navigate>{{ __('Appearance') }}</flux:navlist.item>
-        </flux:navlist>
+@props(['heading' => null, 'subheading' => null])
+
+{{--
+    The account area, in dbelo's clothes.
+
+    ── WHAT WAS WRONG ───────────────────────────────────────────────────────
+
+    This file was the starter kit's, untouched since install: a flux:navlist
+    and two flux headings. That alone would have been cosmetic — the real
+    problem was one line further out. None of the three settings components
+    declared #[Layout], so Livewire fell back to its default, which is the
+    starter kit's own app layout. A signed-in visitor clicking "Settings"
+    left dbelo entirely: different header, different sidebar, no player.
+
+    The fix is in two halves and both matter. Each page now declares
+    #[Layout('layouts.site')], so the surrounding chrome is the site's. This
+    file is only the inner shell.
+
+    ── WHY THE SITE CHROME AND NOT AN ADMIN-STYLE ONE ───────────────────────
+
+    Because the person reading this is a visitor, not staff. They arrived
+    from a sound page, they may have audio playing, and they are going back
+    to the catalogue when they are done. Dropping them into a separate
+    application to change their name breaks all three.
+
+    ── FORM CONTROLS STAY FLUX ──────────────────────────────────────────────
+
+    Deliberate, not laziness: login and register already use flux:input, and
+    two styles of text field on the same account is worse than one style
+    inherited from a package. The shell is what identifies the site.
+--}}
+
+@php
+    /*
+     * One definition of the sections. A second copy — in a footer link, a
+     * dropdown — is the copy that will still list a page after it is
+     * renamed.
+     */
+    $sections = [
+        ['route' => 'profile.edit', 'label' => __('Profile'), 'icon' => 'user'],
+        ['route' => 'security.edit', 'label' => __('Security'), 'icon' => 'shield-halved'],
+        ['route' => 'appearance.edit', 'label' => __('Appearance'), 'icon' => 'palette'],
+    ];
+@endphp
+
+<div class="mx-auto max-w-4xl py-8">
+
+    <div class="mb-8">
+        <div class="micro">{{ __('Account') }}</div>
+        <h1 class="mt-2 text-3xl font-semibold tracking-tight">{{ __('Settings') }}</h1>
+        <p class="mt-2 text-ink/60 dark:text-paper/60">
+            {{ __('Your details, how you sign in, and how dbelo looks to you.') }}
+        </p>
     </div>
 
-    <flux:separator class="md:hidden" />
+    <div class="flex flex-col gap-8 md:flex-row md:items-start">
 
-    <div class="flex-1 self-stretch max-md:pt-6">
-        <flux:heading>{{ $heading ?? '' }}</flux:heading>
-        <flux:subheading>{{ $subheading ?? '' }}</flux:subheading>
+        {{-- On a phone this becomes a scrolling row of pills rather than a
+             stacked list: three items do not deserve a third of the screen
+             above the thing you came to change. --}}
+        <nav class="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 md:mx-0 md:w-52 md:shrink-0 md:flex-col md:overflow-visible md:px-0 md:pb-0"
+             aria-label="{{ __('Settings') }}">
 
-        <div class="mt-5 w-full max-w-lg">
-            {{ $slot }}
+            @foreach ($sections as $section)
+                @php $active = request()->routeIs($section['route']); @endphp
+
+                <a href="{{ route($section['route']) }}" wire:navigate
+                   @class([
+                       'flex shrink-0 items-center gap-2.5 rounded-full px-4 py-2.5 text-[0.88rem] transition duration-200 ease-dbelo md:rounded-control',
+                       'bg-brand text-white' => $active,
+                       'bg-surface shadow-soft-sm hover:-translate-y-0.5 dark:bg-surface-dark' => ! $active,
+                   ])
+                   @if ($active) aria-current="page" @endif>
+                    <x-icon :name="$section['icon']" :style="$active ? 'solid' : 'regular'" class="text-[0.85rem]" />
+                    {{ $section['label'] }}
+                </a>
+            @endforeach
+        </nav>
+
+        <div class="min-w-0 flex-1">
+            @if ($heading)
+                <h2 class="text-[1.15rem] font-medium">{{ $heading }}</h2>
+
+                @if ($subheading)
+                    <p class="mt-1 max-w-[62ch] text-[0.88rem] leading-relaxed text-ink/55 dark:text-paper/55">{{ $subheading }}</p>
+                @endif
+            @endif
+
+            <div class="mt-5 rounded-card bg-surface p-6 shadow-soft-md sm:p-7 dark:bg-surface-dark">
+                {{ $slot }}
+            </div>
         </div>
     </div>
 </div>

@@ -332,8 +332,36 @@ new #[Layout('layouts.admin')] #[Title('Search')] class extends Component {
                 {{-- An error message that does not say what to do next is
                      half an error message. --}}
                 @unless ($this->health['up'])
-                    <p class="mt-2 text-[0.8rem] text-paper/45">Start the engine in its own terminal:</p>
-                    <code class="mt-1.5 block rounded-lg bg-rail px-3.5 py-2.5 font-mono text-[0.78rem] text-paper/70">~/meilisearch/meilisearch</code>
+                    {{-- WHY ./dev.sh AND NOT THE BARE BINARY.
+
+                         This used to say "~/meilisearch/meilisearch", which
+                         fixes search and leaves two things down that fail
+                         far more quietly:
+
+                           queue:work  uploads sit on "Queued" or
+                                       "Converting" forever, with no error
+                                       anywhere — the job simply never runs
+                           npm run dev a missing Vite manifest takes down
+                                       every page that renders the head
+
+                         All four are started by the same script and stop
+                         together when that terminal is closed, so the engine
+                         being down is evidence the others are too. Advice
+                         that repairs one third of an outage sends you back
+                         to debug the other two separately. --}}
+                    @if (app()->environment('local'))
+                        <p class="mt-2 max-w-[70ch] text-[0.8rem] leading-relaxed text-paper/45">
+                            From the project root. This also starts the queue worker, the scheduler and Vite —
+                            they stop at the same time as the engine and fail more quietly than it does:
+                        </p>
+                        <code class="mt-1.5 block rounded-lg bg-rail px-3.5 py-2.5 font-mono text-[0.78rem] text-paper/70">./dev.sh</code>
+                        <p class="mt-2 text-[0.76rem] text-paper/30">
+                            Search engine only: <code class="font-mono">~/meilisearch/meilisearch</code>
+                        </p>
+                    @else
+                        <p class="mt-2 text-[0.8rem] text-paper/45">Start the engine on the server:</p>
+                        <code class="mt-1.5 block rounded-lg bg-rail px-3.5 py-2.5 font-mono text-[0.78rem] text-paper/70">sudo systemctl start meilisearch</code>
+                    @endif
                 @endunless
             </div>
         </div>

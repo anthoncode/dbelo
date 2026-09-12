@@ -216,7 +216,19 @@ new #[Layout('layouts.site')] #[Title('Sound effect')] class extends Component {
          thing that matters most is the darkest thing on screen. It is also
          where the waveform belongs — a light background washes it out.
          ══════════════════════════════════════════════════════════════ --}}
-    <div class="overflow-hidden rounded-panel bg-ink text-paper shadow-soft-lg dark:bg-surface-dark">
+    {{-- NO overflow-hidden here, and that is deliberate.
+
+         It used to be, and it silently broke every dropdown inside this
+         card. The collection picker and the share menu both open as
+         absolutely positioned panels, and an ancestor with overflow-hidden
+         clips them at the card's edge — so the panel opened, rendered, and
+         was cut off or invisible depending on how much room was left below.
+         Nothing errors; the control simply does not appear to work.
+
+         Nothing in this card needs the clip. There is no edge-to-edge image
+         or child with a negative margin — everything sits inside p-6/p-8 —
+         so rounded-panel already gives the rounded corners on its own. --}}
+    <div class="rounded-panel bg-ink text-paper shadow-soft-lg dark:bg-surface-dark">
 
         <div class="p-6 sm:p-8">
 
@@ -239,7 +251,7 @@ new #[Layout('layouts.site')] #[Title('Sound effect')] class extends Component {
                 @endif
             </div>
 
-            <x-waveform-player :sound="$sound" :bars="130" height="h-16" button="size-14" class="mt-7" />
+            <x-waveform-player :sound="$sound" :bars="200" height="h-16" button="size-14" class="mt-7" />
 
             {{-- Under the player, above the description — and a long way
                  from the download button on purpose. An ad beside Download
@@ -419,7 +431,7 @@ new #[Layout('layouts.site')] #[Title('Sound effect')] class extends Component {
 
             <div class="rounded-card bg-surface p-3 shadow-soft-md dark:bg-surface-dark">
                 @foreach (($tab === 'pack' ? $this->packSounds : $this->related) as $other)
-                    <x-sound-row :sound="$other" :bars="70" wire:key="{{ $tab }}-{{ $other->id }}" />
+                    <x-sound-row :sound="$other" wire:key="{{ $tab }}-{{ $other->id }}" />
                 @endforeach
             </div>
         </section>

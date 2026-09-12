@@ -217,13 +217,40 @@ new #[Layout('layouts.admin')] #[Title('Bulk upload')] class extends Component {
 
         $meta = FilenameMeta::parse($name);
 
+        /*
+        | publish_when_ready IS SET HERE, AT CREATION, AND THAT IS THE FIX.
+        |
+        | Conversion starts the moment the file lands — deliberately, so the
+        | waveforms are done by the time fifty titles have been typed. Which
+        | means ProcessSoundUpload reads publish_when_ready BEFORE Save is
+        | ever clicked.
+        |
+        | It used to be left to the column default, which is `false`. So the
+        | checkbox on this screen said "publish when ready" and was ticked,
+        | and the row created a millisecond later said the opposite: two
+        | defaults for one decision, disagreeing. Every upload went to
+        | "In review" until Save came along and republished it.
+        |
+        | Save still corrects it — but only if Save happens. Close the tab
+        | after dropping a hundred files and a hundred untitled sounds sit
+        | in the moderation queue with no way out but one at a time, and the
+        | In review badge counts work that does not exist.
+        |
+        | The column default stays `false`, which is right for what a
+        | contributor uploads. Moderation exists for them, not for the admin
+        | building the catalogue.
+        */
         $sound = $importer->import(
             $path,
             $name,
             auth()->user(),
             null,
             null,
-            ['title' => $meta['title'], 'checksum' => $checksum],
+            [
+                'title' => $meta['title'],
+                'checksum' => $checksum,
+                'publish_when_ready' => $this->publishWhenReady,
+            ],
         );
 
         $this->rows[$sound->id] = [
@@ -480,6 +507,35 @@ new #[Layout('layouts.admin')] #[Title('Bulk upload')] class extends Component {
                 ['name' => $name],
             )->id)
             ->all();
+    }
+
+    /**
+     * The checkbox is live, and the rows already exist when it is clicked.
+     *
+     * Files start converting the instant they land, so by the time somebody
+     * unticks "publish when ready" there is already a batch of rows carrying
+     * the old answer, and the queue is reading it. Without this, the switch
+     * appears to work and applies only to whatever is dropped after it — a
+     * control that is right about the future and silently wrong about
+     * everything already on the screen.
+     *
+     * ONLY ROWS THE QUEUE HAS NOT FINISHED WITH. A sound that already came
+     * out the other side has had its status decided and may be live on the
+     * site; quietly pulling it back down from a checkbox is not something
+     * this method should do behind the admin's back. Save is where that
+     * reconciliation belongs, and it is visible there.
+     */
+    public function updatedPublishWhenReady(): void
+    {
+        if ($this->rows === []) {
+            return;
+        }
+
+        Sound::whereIn('id', array_keys($this->rows))
+            ->whereNull('processed_at')
+            ->update(['publish_when_ready' => $this->publishWhenReady]);
+
+        $this->refresh();
     }
 
     protected function refresh(): void

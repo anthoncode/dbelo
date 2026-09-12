@@ -1,0 +1,61 @@
+# dbelo — the one cron entry this server needs.
+#
+# Install it for the deploy user (NOT root):
+#
+#     crontab -u www-data -e
+#
+# and paste the line below. Do NOT run `crontab -u www-data deploy/crontab`
+# unless you mean it: that REPLACES the user's whole crontab rather than
+# adding to it, and anything else already scheduled there disappears.
+#
+# ── WHY ONLY ONE LINE ────────────────────────────────────────────────────
+#
+# Laravel does not want a cron entry per task. Every scheduled job in the
+# application is declared in routes/console.php, and this single line wakes
+# the scheduler once a minute so it can decide which of them are due. Adding
+# a second cron for anything already declared there means it runs twice.
+#
+# ── WHAT STOPS WORKING WITHOUT IT ────────────────────────────────────────
+#
+# Nothing fails loudly. That is the problem with forgetting it:
+#
+#   RollupStatsCommand      hourly    the admin dashboard chart stops
+#                                     advancing and quietly shows stale days
+#   QueueHeartbeat          5 min     the panel loses its proof that a worker
+#                                     is alive — see below, this one is worse
+#                                     than it sounds
+#   model:prune             daily     the activity log and error groups grow
+#                                     without limit
+#   the newsletter digest   weekly    subscribers simply never hear from you
+#
+# The heartbeat is the one to care about. App\Services\QueueHealth decides
+# whether the queue is healthy from two signals: when a worker was last seen,
+# and how old the oldest unclaimed job is. The heartbeat feeds both — it
+# stamps the cache when it runs, and when no worker is running the heartbeats
+# themselves pile up in the jobs table and give the stall alarm something to
+# measure even on a quiet day when nobody uploaded anything.
+#
+# So: no cron → no heartbeat → a dead queue worker looks exactly like a
+# working one until somebody uploads a sound and waits ten minutes.
+#
+# ── THE LINE ─────────────────────────────────────────────────────────────
+#
+# Output goes to /dev/null on purpose. The scheduler runs 1,440 times a day
+# and mails its output to the local user by default, which fills a mailbox
+# nobody reads with nothing. Anything worth knowing is already in
+# storage/logs and in the panel.
+
+* * * * * cd /var/www/dbelo && php artisan schedule:run >> /dev/null 2>&1
+
+# ── VERIFY IT ────────────────────────────────────────────────────────────
+#
+# After installing, wait one minute and run:
+#
+#     php artisan schedule:list
+#
+# It prints every task and the next time each is due. If a task you expect
+# is missing, it is not the cron — it is routes/console.php.
+#
+# To confirm the cron itself is firing, watch the heartbeat: the Queue screen
+# in the panel shows when a worker was last seen. Within five minutes of
+# installing this it should stop saying "unknown".

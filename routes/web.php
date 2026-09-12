@@ -387,6 +387,45 @@ Route::livewire('admin/packs', 'pages::admin.packs')
     ->middleware('auth')
     ->name('admin.packs');
 
+/*
+| Plans. EDIT ONLY — see the note at the top of the component.
+|
+| No create route on purpose: a plan exists twice, here and inside PayPal,
+| and a row without its PayPal twin is a plan nobody can pay for.
+*/
+Route::livewire('admin/plans', 'pages::admin.plans')
+    ->middleware('auth')
+    ->name('admin.plans');
+
+Route::livewire('admin/subscriptions', 'pages::admin.subscriptions')
+    ->middleware('auth')
+    ->name('admin.subscriptions');
+
+Route::livewire('admin/transactions', 'pages::admin.transactions')
+    ->middleware('auth')
+    ->name('admin.transactions');
+
+Route::livewire('admin/coupons', 'pages::admin.coupons')
+    ->middleware('auth')
+    ->name('admin.coupons');
+
+/*
+| PayPal — status, not settings.
+|
+| The credentials are NOT editable from the panel and are not in the database.
+| They live in .env, because Admin → Backups produces a downloadable dump of
+| every table and a live payment secret riding along in it is somebody taking
+| money in dbelo's name. config/services.php carries the full argument.
+|
+| What was actually missing was a way to see, from the panel, whether PayPal
+| is connected and whether the plans here match the plans there. That is all
+| this screen does — plus one read-only network call to ask for a token,
+| which creates nothing and charges nothing even against live.
+*/
+Route::livewire('admin/paypal', 'pages::admin.paypal')
+    ->middleware('auth')
+    ->name('admin.paypal');
+
 Route::livewire('admin/packs/{pack}', 'pages::admin.packs.edit')
     ->middleware('auth')
     ->name('admin.packs.edit');

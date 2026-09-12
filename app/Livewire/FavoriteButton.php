@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Models\Sound;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 /**
@@ -21,7 +22,7 @@ class FavoriteButton extends Component
     {
         $this->sound = $sound;
         $this->showLabel = $showLabel;
-        $this->favourited = auth()->check() && $sound->favouritedBy()->whereKey(auth()->id())->exists();
+        $this->favourited = $this->isFavourited();
     }
 
     public function toggle(): void
@@ -45,6 +46,30 @@ class FavoriteButton extends Component
         }
 
         $this->dispatch('favourites-changed');
+    }
+
+    /**
+     * Re-read after somebody else changed the same thing.
+     *
+     * The collection picker can now favourite a sound too, and the heart is
+     * usually on screen at the same time. Without this it would sit there
+     * looking empty next to a panel that says the sound is saved — the exact
+     * kind of disagreement that makes people press a control twice and end
+     * up back where they started.
+     *
+     * Re-reading is all this does. It dispatches nothing, so the event that
+     * woke it cannot bounce back.
+     */
+    #[On('favourites-changed')]
+    public function sync(): void
+    {
+        $this->favourited = $this->isFavourited();
+    }
+
+    private function isFavourited(): bool
+    {
+        return auth()->check()
+            && $this->sound->favouritedBy()->whereKey(auth()->id())->exists();
     }
 
     public function render()

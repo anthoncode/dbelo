@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
+use Laravel\Fortify\Actions\DisableTwoFactorAuthentication;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -221,6 +222,69 @@ new #[Layout('layouts.admin')] #[Title('User')] class extends Component {
 
         unset($this->sessions);
         session()->flash('ok', $count ? "{$count} session(s) closed." : 'There were no open sessions.');
+    }
+
+    /**
+     * Take two-factor off an account that cannot get past it.
+     *
+     * ── WHY THIS HAS TO EXIST ────────────────────────────────────────────
+     *
+     * Two-factor is the one setting a person can switch on and then be
+     * unable to switch off. Lose the phone and the recovery codes — a stolen
+     * handset, a new device the authenticator was never migrated to, codes
+     * saved as a screenshot on the same phone — and the account is closed
+     * for good. Every other lockout has a way back; this one had none, and
+     * the only remedy was editing the database by hand.
+     *
+     * This screen already SHOWED "Two-factor: Enabled" and offered nothing
+     * to do about it, which is the worst of both: it names the problem and
+     * withholds the fix.
+     *
+     * ── NOT ON YOUR OWN ACCOUNT ──────────────────────────────────────────
+     *
+     * Turning your own off belongs in Settings → Security, which sits behind
+     * password confirmation. Allowing it here would mean anyone who reaches
+     * an admin session — a borrowed laptop, an unlocked screen — could strip
+     * the second factor from that very account without proving they know the
+     * password. That is precisely the attack two-factor exists to stop, so
+     * the panel must not be a way around it.
+     *
+     * Fortify's action is used rather than nulling the columns here: it
+     * clears the secret, the recovery codes and the confirmation stamp
+     * together, and it stays correct if the package changes what it stores.
+     */
+    public function clearTwoFactor(DisableTwoFactorAuthentication $disableTwoFactorAuthentication): void
+    {
+        if ($this->user->two_factor_confirmed_at === null) {
+            return;
+        }
+
+        if ($this->user->id === auth()->id()) {
+            session()->flash('error', 'Turn your own two-factor off from Settings → Security, where it asks for your password first.');
+
+            return;
+        }
+
+        $disableTwoFactorAuthentication($this->user);
+
+        $this->user->refresh();
+
+        /*
+         * Logged loudly, under the key ActivityCatalog already defines —
+         * 'user.2fa.disabled', labelled "Two-factor disabled" and rated
+         * danger. Inventing a second key for the same event would have given
+         * the activity log two names for one thing, and only one of them
+         * would have had an icon.
+         *
+         * Removing somebody's second factor is one of the few admin actions
+         * that lowers another person's security rather than their access,
+         * and the record of who did it and when is what makes it
+         * accountable.
+         */
+        ActivityLog::record('user.2fa.disabled', $this->user,
+            "User #{$this->user->id}: two-factor removed by an admin");
+
+        session()->flash('ok', 'Two-factor removed. They can sign in with their password alone, and set it up again from their own settings.');
     }
 
     #[Computed]
@@ -634,6 +698,24 @@ new #[Layout('layouts.admin')] #[Title('User')] class extends Component {
                         </p>
                     </div>
                 @endunless
+
+                {{-- The way back from the one lockout that had none.
+
+                     Only shown when there is something to remove, and never
+                     on your own account — see clearTwoFactor(). --}}
+                @if ($user->two_factor_confirmed_at && $user->id !== auth()->id())
+                    <div class="border-t border-hairline p-5">
+                        <button wire:click="clearTwoFactor"
+                                wire:confirm="Remove two-factor from this account? They will sign in with their password alone until they set it up again. This is recorded in the activity log."
+                                class="w-full rounded-lg bg-warning/15 px-4 py-2.5 text-[0.83rem] text-warning transition hover:bg-warning/25">
+                            Remove two-factor
+                        </button>
+                        <p class="mt-2 text-[0.72rem] leading-relaxed text-paper/30">
+                            For somebody who lost the phone <em>and</em> the recovery codes. Confirm it is really them first — this
+                            is the check an attacker would most like you to skip.
+                        </p>
+                    </div>
+                @endif
             </div>
         </div>
     @endif

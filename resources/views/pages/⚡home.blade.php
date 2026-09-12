@@ -4,7 +4,6 @@ use App\Models\Category;
 use App\Models\Collection as Pack;
 use App\Models\Plan;
 use App\Models\Sound;
-use App\Support\Homepage;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -45,22 +44,9 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
 
     public function mount(): void
     {
-        /*
-         * NO 'description' KEY HERE, and that is the point.
-         *
-         * The landing page IS the site, so its meta description is the site
-         * description — the one edited in Admin → Settings → General, which
-         * partials/head.blade.php already uses as its default. A copy typed
-         * here would win the array_merge and silently beat the setting on
-         * the single page most likely to be checked; that is exactly how it
-         * looked like the field did nothing.
-         *
-         * Section pages are different and keep their own: /sounds describes
-         * a catalogue, /packs describes packs, a sound page describes that
-         * sound. Only this one has nothing narrower to say.
-         */
         view()->share('seo', [
             'title' => null,   // the landing uses the bare site title
+            'description' => 'Thousands of studio-grade sound effects, cleared for commercial use. Listen to everything free, download with an account.',
             'canonical' => route('home'),
             'jsonld' => [
                 '@context' => 'https://schema.org',
@@ -133,7 +119,7 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
             ->whereHas('sounds', fn ($q) => $q->published())
             ->orderByDesc('downloads_total')
             ->orderByDesc('sounds_count')
-            ->limit(Homepage::number('categories_limit'))
+            ->limit(6)
             ->get();
     }
 
@@ -144,7 +130,7 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
         return Pack::featured()
             ->withCount(['sounds' => fn ($q) => $q->published()])
             ->orderByDesc('sounds_count')
-            ->limit(Homepage::number('packs_limit'))
+            ->limit(4)
             ->get();
     }
 
@@ -161,7 +147,7 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
         return Sound::published()
             ->with(['files', 'category', 'user:id,name', 'tags:id,name'])
             ->latest('published_at')
-            ->limit(Homepage::number('newest_limit'))
+            ->limit(5)
             ->get();
     }
 
@@ -195,27 +181,21 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
         <div class="pointer-events-none absolute inset-x-0 top-24 -z-10 mx-auto max-w-[820px] px-6 opacity-60 dark:opacity-45"
              style="mask-image: linear-gradient(to right, transparent, #000 22%, #000 78%, transparent);
                     -webkit-mask-image: linear-gradient(to right, transparent, #000 22%, #000 78%, transparent);">
-            <x-ambient-wave :bars="72" height="h-32" />
+            <x-ambient-wave :bars="190" height="h-32" />
         </div>
 
-        {{-- The counter. Switchable because before launch it reads
-             "0 sounds online", which is worse than saying nothing. --}}
-        @if (\App\Support\Homepage::flag('hero_badge'))
-            <span class="rise mb-7 inline-flex items-center gap-2 rounded-full bg-surface px-4 py-2 text-sm text-ink/60 shadow-soft-sm dark:bg-surface-dark dark:text-paper/60">
-                <span class="size-2 rounded-full bg-brand"></span>
-                {{ number_format($this->totals['sounds']) }} {{ Str::plural('sound', $this->totals['sounds']) }} online
-            </span>
-        @endif
+        <span class="rise mb-7 inline-flex items-center gap-2 rounded-full bg-surface px-4 py-2 text-sm text-ink/60 shadow-soft-sm dark:bg-surface-dark dark:text-paper/60">
+            <span class="size-2 rounded-full bg-brand"></span>
+            {{ number_format($this->totals['sounds']) }} {{ Str::plural('sound', $this->totals['sounds']) }} online
+        </span>
 
-        {{-- {!! !!}, and safe: \App\Support\Homepage::rich() escapes the stored text
-             first and only then applies the one piece of markup it allows.
-             The table never holds HTML — see App\Support\Copy. --}}
         <h1 class="rise text-[clamp(2.6rem,6vw,4.4rem)] font-bold" style="animation-delay: 60ms">
-            {!! \App\Support\Homepage::rich('hero_title') !!}
+            Every sound your<br><span class="key">story</span> needs
         </h1>
 
         <p class="rise mx-auto mt-6 max-w-[54ch] text-[1.08rem] text-ink/60 dark:text-paper/60" style="animation-delay: 120ms">
-            {!! \App\Support\Homepage::rich('hero_subtitle') !!}
+            Studio-grade sound effects, cleared for commercial use.
+            Listen to everything <span class="key">free</span>.
         </p>
 
         <div x-data="{ open: false }" @click.outside="open = false"
@@ -226,7 +206,7 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
 
                 <input type="search" wire:model.live.debounce.250ms="q" @focus="open = true"
                        autocomplete="off"
-                       placeholder="{{ \App\Support\Homepage::text('hero_placeholder') }}"
+                       placeholder="door creak, thunder, laser, footsteps on gravel…"
                        class="min-w-0 flex-1 border-0 bg-transparent p-0 text-base font-light placeholder:text-ink/35 focus:outline-none focus:ring-0 dark:placeholder:text-paper/35" />
 
                 <button type="submit"
@@ -328,11 +308,11 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
          click here and the persistent bar appears — which explains the whole
          product better than any paragraph on this page.
          ══════════════════════════════════════════════════════════════ --}}
-    @if (\App\Support\Homepage::flag('newest_on') && $this->latest->isNotEmpty())
+    @if ($this->latest->isNotEmpty())
         <section class="py-10">
-            <x-section-head :eyebrow="\App\Support\Homepage::text('newest_eyebrow')"
-                            :title="\App\Support\Homepage::rich('newest_title')"
-                            :lead="\App\Support\Homepage::text('newest_lead')">
+            <x-section-head eyebrow="Newest"
+                            title="Press play. That is the whole demo."
+                            lead="Nothing here is a preview clip. Every sound plays end to end, for free, without an account.">
                 <x-slot:action>
                     <a href="{{ route('sounds.index', ['sort' => 'newest']) }}" wire:navigate
                        class="flex items-center gap-2 rounded-full bg-surface px-5 py-2.5 text-[0.85rem] shadow-soft-sm transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:text-brand hover:shadow-soft-md dark:bg-surface-dark">
@@ -344,7 +324,7 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
 
             <div class="rise rounded-card bg-surface p-3 shadow-soft-md dark:bg-surface-dark">
                 @foreach ($this->latest as $sound)
-                    <x-sound-row :sound="$sound" :bars="80" wire:key="new-{{ $sound->id }}" />
+                    <x-sound-row :sound="$sound" wire:key="new-{{ $sound->id }}" />
                 @endforeach
             </div>
         </section>
@@ -353,11 +333,11 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
     {{-- ══════════════════════════════════════════════════════════════
          CATEGORIES — by what the sound IS
          ══════════════════════════════════════════════════════════════ --}}
-    @if (\App\Support\Homepage::flag('categories_on') && $this->categories->isNotEmpty())
+    @if ($this->categories->isNotEmpty())
         <section class="py-10">
-            <x-section-head :eyebrow="\App\Support\Homepage::text('categories_eyebrow')"
-                            :title="\App\Support\Homepage::rich('categories_title')"
-                            :lead="\App\Support\Homepage::text('categories_lead')" />
+            <x-section-head eyebrow="Categories"
+                            title='Browse by what the sound <span class="key">is</span>'
+                            lead="The six our visitors reach for most. Everything else is one click further in." />
 
             <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 @foreach ($this->categories as $i => $cat)
@@ -392,11 +372,11 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
     {{-- Shown to an admin even when empty, the same way an unpublished
          post shows with a banner: you cannot design a section you cannot
          see, and hiding it until the data exists is how it stays unbuilt. --}}
-    @if (\App\Support\Homepage::flag('packs_on') && ($this->packs->isNotEmpty() || auth()->user()?->isAdmin()))
+    @if ($this->packs->isNotEmpty() || auth()->user()?->isAdmin())
         <section class="py-10">
-            <x-section-head :eyebrow="\App\Support\Homepage::text('packs_eyebrow')"
-                            :title="\App\Support\Homepage::rich('packs_title')"
-                            :lead="\App\Support\Homepage::text('packs_lead')" />
+            <x-section-head eyebrow="Packs"
+                            title='Or by what you are <span class="key">making</span>'
+                            lead="Sets pulled from across the catalogue for one job. A podcast intro needs a sting, a room tone and a click — three categories, one afternoon of work." />
 
             <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:grid-rows-2">
 
@@ -450,12 +430,12 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
     {{-- ══════════════════════════════════════════════════════════════
          PLANS
          ══════════════════════════════════════════════════════════════ --}}
-    @if (\App\Support\Homepage::flag('plans_on') && $this->plans->isNotEmpty())
+    @if ($this->plans->isNotEmpty())
         <section class="py-14">
             <div class="rise text-center">
-                <div class="micro">{{ \App\Support\Homepage::text('plans_eyebrow') }}</div>
+                <div class="micro">Plans</div>
                 <h2 class="mt-2 text-[clamp(1.6rem,3.4vw,2.3rem)] font-semibold">
-                    {!! \App\Support\Homepage::rich('plans_title') !!}
+                    Listen free. <span class="key">Download</span> without limits.
                 </h2>
             </div>
 
@@ -523,7 +503,7 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
          saying so. Same rule as the packs section above: a block that only
          renders for logged-out visitors is a block you can never look at
          while you are building the page, so it silently rots. --}}
-    @if (\App\Support\Homepage::flag('cta_on') && (auth()->guest() || auth()->user()?->isAdmin()))
+    @if (auth()->guest() || auth()->user()?->isAdmin())
         <section class="py-10">
             @auth
                 <div class="rise mb-3 flex items-center gap-2.5 text-[0.85rem] text-warning">
@@ -537,15 +517,15 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
                 <div class="pointer-events-none absolute inset-x-0 bottom-0 opacity-30"
                      style="mask-image: linear-gradient(to top, #000, transparent);
                             -webkit-mask-image: linear-gradient(to top, #000, transparent);">
-                    <x-ambient-wave :bars="90" height="h-24" />
+                    <x-ambient-wave :bars="150" height="h-24" />
                 </div>
 
                 <div class="relative">
                     <h2 class="text-[clamp(1.6rem,3.4vw,2.3rem)] font-semibold">
-                        {!! \App\Support\Homepage::rich('cta_title') !!}
+                        Start with a <span class="key">free</span> account
                     </h2>
                     <p class="mx-auto mt-3 max-w-[46ch] text-[0.95rem] text-paper/60">
-                        {{ \App\Support\Homepage::text('cta_lead') }}
+                        Five downloads a day, no card, no trial clock. Upgrade the day you need more, not before.
                     </p>
 
                     <a href="{{ route('register') }}" wire:navigate

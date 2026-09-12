@@ -263,7 +263,7 @@ new #[Layout('layouts.site')] #[Title('Sound effects')] class extends Component 
         <div class="pointer-events-none absolute inset-x-0 top-8 -z-10 mx-auto max-w-[700px] px-6 opacity-50 dark:opacity-40"
              style="mask-image: linear-gradient(to right, transparent, #000 25%, #000 75%, transparent);
                     -webkit-mask-image: linear-gradient(to right, transparent, #000 25%, #000 75%, transparent);">
-            <x-ambient-wave :bars="56" height="h-24" />
+            <x-ambient-wave :bars="140" height="h-24" />
         </div>
 
         <h1 class="text-[clamp(2.2rem,5vw,3.4rem)] font-bold">

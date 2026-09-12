@@ -124,7 +124,12 @@
         @else
             <div class="max-h-[26rem] divide-y divide-hairline overflow-y-auto">
                 @foreach ($notices as $notice)
-                    <a href="{{ $notice['route'] ? route($notice['route']) : route('admin.diagnostics') }}"
+                    {{-- The params are what make a count clickable rather
+                         than merely informative: "37 published sounds have no
+                         category" lands on those thirty-seven, not on the
+                         full catalogue with thirty-seven needles in it. Most
+                         notices carry none and the empty array is a no-op. --}}
+                    <a href="{{ $notice['route'] ? route($notice['route'], $notice['params'] ?? []) : route('admin.diagnostics') }}"
                        wire:navigate
                        class="flex items-start gap-3 px-4 py-3.5 transition hover:bg-paper/[0.04]"
                        wire:key="notice-{{ $loop->index }}">

@@ -11,16 +11,52 @@ new #[Layout('layouts.site')] class extends Component {
     /** Visible to the admin before it is published: this is the preview. */
     public bool $isDraft = false;
 
-    public function mount(string $post): void
+    /**
+     * The post, already resolved by the route.
+     *
+     * ── WHY THIS TAKES A MODEL AND NOT A STRING ──────────────────────────
+     *
+     * It used to be `mount(string $post)` and did its own lookup. That did
+     * not work, and the failure was invisible: the route parameter is named
+     * `{post}`, so Laravel's implicit binding resolves it to App\Models\Post
+     * BEFORE this component is ever constructed. Two consequences, both bad:
+     *
+     *   - A slug with no row 404'd inside SubstituteBindings, so none of the
+     *     logic below — the type check, the admin draft preview — ever ran.
+     *     The 404 came from the framework and looked identical to a missing
+     *     route.
+     *   - A slug WITH a row bound successfully and then handed a Post object
+     *     to a parameter typed `string`.
+     *
+     * So the page could only 404 or crash. Taking the model is what the
+     * route was already doing; this just stops arguing with it, and matches
+     * how sounds/⚡show.blade.php has always worked.
+     *
+     * The catch-all page route does not have this problem because its
+     * parameter is named `{page}` and there is no Page model to bind to —
+     * which is exactly why pages worked and the blog did not.
+     */
+    public function mount(Post $post): void
     {
-        $this->post = Post::posts()
-            ->where('slug', $post)
-            // An admin sees drafts, so the "Open" link in the editor shows
-            // the real page instead of a 404 before publishing.
-            ->unless(auth()->user()?->isAdmin(), fn ($q) => $q->live())
-            ->firstOrFail();
+        /*
+         * The binding resolves by slug and knows nothing about `type`, so a
+         * PAGE reached through /blog/ would otherwise render here. Pages and
+         * posts share one table; only this line keeps the two URL spaces
+         * apart.
+         */
+        abort_unless($post->type === Post::TYPE_POST, 404);
+
+        $this->post = $post;
 
         $this->isDraft = ! $this->post->isLive();
+
+        /*
+         * An admin sees drafts, so the "Open" link in the editor is a real
+         * preview instead of a 404. Everybody else gets a 404 — not a 403,
+         * because "this exists but you may not see it" confirms the post
+         * exists, and an unpublished post's existence is not public.
+         */
+        abort_if($this->isDraft && ! auth()->user()?->isAdmin(), 404);
 
         $this->post->load(['cover', 'category', 'tags', 'author']);
 

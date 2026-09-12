@@ -7,13 +7,28 @@ use Illuminate\Validation\ValidationException;
 use Laravel\Fortify\Actions\DisableTwoFactorAuthentication;
 use Laravel\Fortify\Features;
 use Laravel\Fortify\Fortify;
-use Livewire\Attributes\Title;
-use Livewire\Component;
 use Laravel\Passkeys\Actions\DeletePasskey;
+use Livewire\Attributes\Layout;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
+use Livewire\Attributes\Title;
+use Livewire\Component;
 
-new #[Title('Security settings')] class extends Component {
+/*
+ * Security.
+ *
+ * The two-factor and passkey blocks below are still Flux, and that is a
+ * decision rather than an oversight: they are opened once in the life of an
+ * account, they work, and re-implementing a QR code, one-time recovery codes
+ * and a WebAuthn registration against Fortify's API buys coherence on a
+ * screen almost nobody sees twice.
+ *
+ * What DID have to change is the layout attribute. Without it Livewire falls
+ * back to the starter kit's app layout, and a visitor changing their
+ * password left dbelo entirely — different header, no player, no way back
+ * to the catalogue.
+ */
+new #[Layout('layouts.site')] #[Title('Security settings')] class extends Component {
     use PasswordValidationRules;
 
     public string $current_password = '';
@@ -166,12 +181,13 @@ new #[Title('Security settings')] class extends Component {
     }
 }; ?>
 
+{{-- The page heading and the section nav now come from the settings shell,
+     so the starter kit's own heading partial is gone from here. Two headings
+     stacked was the visible half of the layout problem. --}}
 <section class="w-full">
-    @include('partials.settings-heading')
-
-    <flux:heading class="sr-only">{{ __('Security settings') }}</flux:heading>
-
-    <x-pages::settings.layout :heading="__('Update password')" :subheading="__('Ensure your account is using a long, random password to stay secure')">
+    <x-pages::settings.layout
+        :heading="__('Security')"
+        :subheading="__('Your password, a second step when you sign in, and passkeys for signing in without one.')">
         <form method="POST" wire:submit="updatePassword" class="mt-6 space-y-6">
             <flux:input
                 wire:model="current_password"

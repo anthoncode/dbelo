@@ -458,9 +458,47 @@ class SeoAudit
             return true;   // not something we can check; assume the route is right
         }
 
-        return DB::table($table)
-            ->where(fn ($q) => $q->where('slug', $value)->orWhere('id', $value))
-            ->exists();
+        $query = DB::table($table)
+            ->where(fn ($q) => $q->where('slug', $value)->orWhere('id', $value));
+
+        /*
+         * ── EXISTING IS NOT THE SAME AS REACHABLE ────────────────────────
+         *
+         * This used to ask only "is there a row?", which reported a link to
+         * a DRAFT or a SOFT-DELETED post as perfectly fine — while it 404s
+         * for every visitor.
+         *
+         * That is a false negative in the one case that happens most: you
+         * write a post, link to another one you have not published yet, and
+         * publish the first. The link is broken from the moment it goes
+         * live, and the screen built to catch exactly this said nothing.
+         *
+         * The filters below are per-table rather than sniffed from the
+         * column names, because "status" does not mean the same thing in
+         * every table and a wrong guess here turns this check into the
+         * opposite problem: a list of links that are fine.
+         */
+        match ($table) {
+            'posts' => $query
+                ->whereNull('deleted_at')
+                ->where('status', 'published')
+                ->whereNotNull('published_at')
+                // Scheduled for next Tuesday is a 404 today.
+                ->where('published_at', '<=', now()),
+
+            'sounds' => $query
+                ->whereNull('deleted_at')
+                ->where('status', 'published')
+                ->whereNotNull('published_at'),
+
+            // Packs have no status: a private one is simply not public.
+            'collections' => $query->where('is_public', true),
+
+            // Categories are always reachable once they exist.
+            default => $query,
+        };
+
+        return $query->exists();
     }
 
     /* ═════════════════════════════ Helpers ═════════════════════════════ */

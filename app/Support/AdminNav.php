@@ -55,14 +55,30 @@ class AdminNav
                 'label' => 'Billing',
                 'icon' => 'credit-card',
                 'items' => [
-                    ['label' => 'Plans', 'icon' => 'layer-group', 'route' => null],
-                    ['label' => 'Subscriptions', 'icon' => 'repeat', 'route' => null],
-                    ['label' => 'Transactions', 'icon' => 'receipt', 'route' => null],
-                    ['label' => 'Coupons', 'icon' => 'ticket', 'route' => null],
-                    // The download LOG — who took what, and when. Not the
-                    // same entry as Settings → Downloads, which is the one
-                    // number deciding what a visitor gets for free.
-                    ['label' => 'Downloads', 'icon' => 'arrow-down-to-line', 'route' => null],
+                    ['label' => 'Plans', 'icon' => 'layer-group', 'route' => 'admin.plans'],
+                    ['label' => 'Subscriptions', 'icon' => 'repeat', 'route' => 'admin.subscriptions'],
+                    ['label' => 'Transactions', 'icon' => 'receipt', 'route' => 'admin.transactions'],
+                    ['label' => 'Coupons', 'icon' => 'ticket', 'route' => 'admin.coupons'],
+
+                    /*
+                     * Last in the group on purpose: it is the screen you open
+                     * when something is wrong or when setting up, not the one
+                     * you open daily. Billing rather than Settings because
+                     * everything on it — the webhook, plan sync, the event
+                     * log — is an operation, not a preference.
+                     */
+                    ['label' => 'PayPal', 'icon' => 'plug', 'route' => 'admin.paypal'],
+                    /*
+                     * "Downloads" was here and has been dropped on purpose.
+                     *
+                     * The downloads table already feeds four things — the
+                     * per-sound counter, the quota check in canDownload(),
+                     * the dashboard chart and Analytics. A screen of its own
+                     * would add only per-person forensics, which matters for
+                     * a payment dispute and an abuse investigation, and
+                     * neither of those exists yet. An empty menu item is a
+                     * promise; this one was not being kept.
+                     */
                 ],
             ],
 

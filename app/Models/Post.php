@@ -6,8 +6,10 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use App\Services\RedirectResolver;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 /**
@@ -53,6 +55,80 @@ class Post extends Model
 
         static::saved($flush);
         static::deleted($flush);
+
+        /*
+         * A slug that changes leaves a redirect behind.
+         *
+         * ── WHY THIS IS NOT OPTIONAL ─────────────────────────────────────
+         *
+         * Renaming a published post used to break every link that already
+         * pointed at it — links inside other posts, whatever was shared on
+         * social, and whatever Google had indexed — with no error anywhere.
+         * The old URL simply started answering 404, and nothing in the panel
+         * said so until somebody happened to open Admin → SEO and read the
+         * broken-links list.
+         *
+         * The redirects table was built for exactly this: `source` has had a
+         * 'post' => 'Page or post moved' entry since the day it was written.
+         * It was just never wired up.
+         *
+         * ── THE THREE CARE POINTS ────────────────────────────────────────
+         *
+         *  1. Only for posts that WERE published. Renaming a draft changes a
+         *     URL nobody could reach, and writing a rule for it fills the
+         *     table with noise that makes the real rules harder to read.
+         *
+         *  2. collapse() before writing. If /a already redirects to /b and
+         *     the slug now moves to /c, storing "/a → /b, /b → /c" is two
+         *     round trips for the visitor and becomes an infinite loop the
+         *     day somebody writes /c → /a. Collapsing means the table can
+         *     never hold a chain.
+         *
+         *  3. repointTo() after writing. The rule written last month that
+         *     points at the OLD url gets repaired to point past it, instead
+         *     of quietly turning into the hop that (2) just avoided.
+         *
+         * updated() rather than updating(): the redirect should only exist
+         * if the rename actually committed. At this point getOriginal() still
+         * holds the pre-save values — syncOriginal() runs after this fires.
+         */
+        static::updated(function (Post $post) {
+            if (! $post->wasChanged('slug') || ! Schema::hasTable('redirects')) {
+                return;
+            }
+
+            // Was this URL ever reachable? See care point 1.
+            if ($post->getOriginal('status') !== self::STATUS_PUBLISHED) {
+                return;
+            }
+
+            $old = (string) $post->getOriginal('slug');
+            $new = (string) $post->slug;
+
+            if ($old === '' || $new === '' || $old === $new) {
+                return;
+            }
+
+            // Pages live at the root, posts under /blog/. Post::url() is the
+            // other half of this and the two must not disagree.
+            $prefix = $post->isPage() ? '' : 'blog/';
+
+            $from = RedirectResolver::normalise($prefix.$old);
+            $to = '/'.$prefix.$new;
+
+            Redirect::updateOrCreate(
+                ['from' => $from],
+                [
+                    'to' => Redirect::collapse($to),
+                    'status' => 301,
+                    'is_wildcard' => false,
+                    'source' => 'post',
+                    'note' => "Slug changed: {$old} → {$new}",
+                ],
+            );
+
+            Redirect::repointTo($from, $to);
+        });
     }
 
     // ---------------------------------------------------------------

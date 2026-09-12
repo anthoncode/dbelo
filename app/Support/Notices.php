@@ -75,6 +75,12 @@ class Notices
 
         // Contributors waiting on you. This is the system working.
         'review' => self::INFO,
+        // Published, playable, downloadable — and missing from every
+        // category page. Blue and not amber on purpose: nothing is broken
+        // and no visitor is having a bad time. It is unfinished work that
+        // costs you reach, which is the same shape as a review queue, not
+        // the same shape as a stopped worker.
+        'uncategorised' => self::INFO,
     ];
 
     /**
@@ -111,7 +117,7 @@ class Notices
     /**
      * Every open notice, worst first.
      *
-     * @return array<int, array{level: string, icon: string, title: string, detail: string, route: ?string, count: ?int}>
+     * @return array<int, array{level: string, icon: string, title: string, detail: string, route: ?string, params: array<string, string>, count: ?int}>
      */
     public static function all(): array
     {
@@ -211,9 +217,30 @@ class Notices
             'review' => ['clipboard-check', 'moderate',
                 fn ($n) => $n === 1 ? 'One sound waiting on review' : "{$n} sounds waiting on review",
                 'Contributors are waiting. This is the queue working, not a fault.'],
+
+            'uncategorised' => ['folder-xmark', 'admin.sounds',
+                fn ($n) => $n === 1 ? 'One published sound has no category' : "{$n} published sounds have no category",
+                'They are live and downloadable, but they appear on no category page — and a category page is a search '
+                .'result with its own title, not just a filter. Their own pages lose the breadcrumb and fall back to a '
+                .'generic description.'],
         ];
 
         $notices = [];
+
+        /*
+         * Query parameters for the few notices whose screen needs telling
+         * WHICH rows to show.
+         *
+         * A notice that reports a number and then lands you on an unfiltered
+         * list has done half its job: it tells you thirty-seven things are
+         * wrong and leaves you to find them. Kept as a separate map so the
+         * shape above stays four columns wide and readable.
+         */
+        $params = [
+            // The sentinel the admin sounds filter understands. See the
+            // query in pages/admin/⚡sounds.blade.php.
+            'uncategorised' => ['category' => 'none', 'status' => 'published'],
+        ];
 
         foreach ($shape as $key => [$icon, $route, $title, $detail]) {
             $n = (int) ($counts[$key] ?? 0);
@@ -228,6 +255,7 @@ class Notices
                 'title' => $title($n),
                 'detail' => $detail,
                 'route' => $route,
+                'params' => $params[$key] ?? [],
                 'count' => $n,
             ];
         }
@@ -267,6 +295,10 @@ class Notices
                         // Every check knows where it is fixed; the ones that
                         // do not send you to the screen that explains them.
                         'route' => $check['route'] ?: 'admin.diagnostics',
+                        // A health check points at a screen, never at a
+                        // filtered subset of one. Present so every notice has
+                        // the same shape.
+                        'params' => [],
                         'count' => null,
                     ];
                 }
@@ -286,6 +318,7 @@ class Notices
                 'title' => 'Health checks could not run',
                 'detail' => $e->getMessage(),
                 'route' => 'admin.diagnostics',
+                'params' => [],
                 'count' => null,
             ]];
         }

@@ -1,6 +1,6 @@
 @props([
     'sound',
-    'bars' => 90,
+    'bars' => 150,
     'showAuthor' => true,
 ])
 

@@ -1,8 +1,8 @@
 @props([
     'sound',
-    'bars' => 90,
+    'bars' => 150,
     'height' => 'h-8',
-    'thickness' => 'w-[2px]',
+    'thickness' => 'w-px',
     'button' => 'size-10',
     'showTime' => true,
 ])
@@ -13,16 +13,40 @@
     $preview = $sound->files->firstWhere('purpose', 'preview');
     $src = $preview ? Storage::disk($preview->disk)->url($preview->path) : null;
 
-    // Stored with ~400 peaks. Lists need fewer bars, so peaks are averaged
-    // down — averaged, not sampled, so a single sharp transient cannot fall
-    // between two picks and disappear.
+    /*
+     * Stored with 400 peaks; thinned to exactly $bars of them.
+     *
+     * EXACTLY, and that word is the fix. This used to chunk by
+     * ceil(400 / $bars), which only lands on $bars when $bars divides 400.
+     * Everywhere else it silently drew fewer: 90 gave 80, 130 gave 100, and
+     * anything from 201 to 399 gave 200 flat. The bars are laid out with
+     * justify-between, so "fewer bars" does not mean a shorter waveform — it
+     * means the same width shared between fewer of them. Every gap widens.
+     *
+     * That is most of why the wide ones looked so spread out: the sound page
+     * asked for 130 bars across a thousand pixels and got a hundred.
+     *
+     * Boundaries by integer division so the slices tile the array with no
+     * overlap and nothing left over at the end.
+     *
+     * max() of each slice, not the average: a waveform is drawn to show
+     * where the loud parts are, and averaging a sharp transient with the
+     * silence around it is how a gunshot turns into a bump.
+     */
     $peaks = $sound->waveform ?? [];
 
     if ($peaks && count($peaks) > $bars) {
-        $chunkSize = (int) ceil(count($peaks) / $bars);
-        $peaks = collect($peaks)->chunk($chunkSize)
-            ->map(fn ($chunk) => round($chunk->max(), 4))
-            ->values()->all();
+        $total = count($peaks);
+        $thinned = [];
+
+        for ($i = 0; $i < $bars; $i++) {
+            $start = intdiv($i * $total, $bars);
+            $end = intdiv(($i + 1) * $total, $bars);
+
+            $thinned[] = round(max(array_slice($peaks, $start, max(1, $end - $start))), 4);
+        }
+
+        $peaks = $thinned;
     }
 
     // A 7% floor keeps silence visible instead of collapsing to nothing.
@@ -96,7 +120,7 @@
             {{-- Unplayed bars: currentColor, so they adapt to light or dark cards --}}
             <div class="absolute inset-0 flex items-center justify-between">
                 @foreach ($heights as $h)
-                    <span class="{{ $thickness }} shrink-0 rounded-full bg-current opacity-20" style="height: {{ $h }}%"></span>
+                    <span class="{{ $thickness }} rounded-full bg-current opacity-25" style="height: {{ $h }}%"></span>
                 @endforeach
             </div>
 
@@ -106,7 +130,7 @@
             <div class="absolute inset-0 flex items-center justify-between"
                  :style="`clip-path: inset(0 ${100 - progress * 100}% 0 0)`">
                 @foreach ($heights as $h)
-                    <span class="{{ $thickness }} shrink-0 rounded-full bg-brand" style="height: {{ $h }}%"></span>
+                    <span class="{{ $thickness }} rounded-full bg-brand" style="height: {{ $h }}%"></span>
                 @endforeach
             </div>
         </div>

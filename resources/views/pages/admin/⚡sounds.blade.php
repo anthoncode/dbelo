@@ -3,6 +3,7 @@
 use App\Jobs\ProcessSoundUpload;
 use App\Models\ActivityLog;
 use App\Models\Category;
+use App\Models\Collection as Pack;
 use App\Models\Sound;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -19,6 +20,15 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
     #[Url(except: 'all')] public string $status = 'all';
     #[Url(as: 'q', except: '')] public string $search = '';
     #[Url(except: '')] public string $category = '';
+
+    /*
+     * Which pack, by id.
+     *
+     * Here so a whole pack can be selected and then acted on in one go with
+     * the bulk controls that already exist — marking forty sounds premium
+     * one row at a time is what stops premium packs from existing at all.
+     */
+    #[Url(except: '')] public string $pack = '';
     #[Url(except: '')] public string $type = '';
     #[Url(except: 'recent')] public string $sort = 'recent';
 
@@ -46,7 +56,7 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
      */
     public function updated(string $property): void
     {
-        if (in_array($property, ['status', 'search', 'category', 'type', 'sort'], true)) {
+        if (in_array($property, ['status', 'search', 'category', 'pack', 'type', 'sort'], true)) {
             $this->resetPage();
             $this->selected = [];
         }
@@ -63,7 +73,29 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
             ->when($this->status === 'trashed', fn ($q) => $q->onlyTrashed())
             ->when(! in_array($this->status, ['all', 'trashed'], true),
                 fn ($q) => $q->where('status', $this->status))
-            ->when($this->category, fn ($q, $c) => $q->where('category_id', $c))
+            /*
+            | Packs are a many-to-many, so this is whereHas and not a column.
+            | Qualified as collections.id because the pivot carries a bare
+            | `id` too and MySQL will not guess which one you meant.
+            */
+            ->when($this->pack, fn ($q, $p) => $q->whereHas('collections',
+                fn ($c) => $c->where('collections.id', $p)))
+            /*
+            | 'none' is a SENTINEL, not an id.
+            |
+            | Category ids are integers, so the string can never collide with
+            | a real one — which is what makes "no category at all" express-
+            | ible in a filter whose whole vocabulary was "this category".
+            |
+            | It needs its own branch because `where('category_id', null)`
+            | does not do what it looks like: SQL compares NULL to nothing,
+            | not even to NULL, so that clause matches zero rows instead of
+            | the rows with nothing in them. whereNull() is the only spelling
+            | that asks the question.
+            */
+            ->when($this->category === 'none', fn ($q) => $q->whereNull('category_id'))
+            ->when($this->category !== '' && $this->category !== 'none',
+                fn ($q) => $q->where('category_id', $this->category))
             ->when($this->type, fn ($q, $t) => $q->where('type', $t))
             ->when($this->search, fn ($q, $s) => $q->where(fn ($w) => $w
                 ->where('title', 'like', "%{$s}%")
@@ -109,6 +141,22 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
     public function categories()
     {
         return Category::orderBy('parent_id')->orderBy('sort_order')->orderBy('name')->get();
+    }
+
+    /**
+     * Packs, with how many sounds each holds.
+     *
+     * The count is in the label because "Doors (0)" is the answer to a
+     * question you would otherwise ask by selecting it and finding an empty
+     * table.
+     */
+    #[Computed]
+    public function packs()
+    {
+        return Pack::query()
+            ->select(['id', 'name', 'sounds_count'])
+            ->orderBy('name')
+            ->get();
     }
 
     // ---------------------------------------------------------------
@@ -452,8 +500,29 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
         <select wire:model.live="category"
                 class="rounded-lg border-0 bg-raised px-3 py-2.5 text-[0.83rem] text-paper focus:outline-none focus:ring-2 focus:ring-brand/40">
             <option value="">All categories</option>
+
+            {{-- Above the list, not buried at the bottom of forty names.
+                 It is the option somebody comes here looking for after the
+                 bell told them a number, and the one they would never find
+                 by scrolling because it is not a category. --}}
+            <option value="none">— No category —</option>
+
             @foreach ($this->categories as $cat)
                 <option value="{{ $cat->id }}">{{ $cat->name }}</option>
+            @endforeach
+        </select>
+
+        {{-- Packs.
+
+             Next to the category filter because they answer the same kind of
+             question — "show me this group" — and because the pair of them is
+             how a whole pack gets marked premium: filter to it, tick the
+             header checkbox, use the bulk bar. Forty rows, three clicks. --}}
+        <select wire:model.live="pack"
+                class="max-w-[14rem] rounded-lg border-0 bg-raised px-3 py-2.5 text-[0.83rem] text-paper focus:outline-none focus:ring-2 focus:ring-brand/40">
+            <option value="">All packs</option>
+            @foreach ($this->packs as $packOption)
+                <option value="{{ $packOption->id }}">{{ $packOption->name }} ({{ $packOption->sounds_count }})</option>
             @endforeach
         </select>
 
