@@ -197,6 +197,30 @@ class Sound extends Model
         return $this->status === self::STATUS_PUBLISHED && $this->published_at !== null;
     }
 
+    /**
+     * Recent enough to be worth pointing at.
+     *
+     * ── WHY FOURTEEN DAYS ────────────────────────────────────────────────
+     *
+     * This catalogue grows in batches, not in a trickle — fifty sounds land
+     * in an afternoon and then nothing for a week. A window of a day or two
+     * would mark an entire upload at once and then nothing at all, which
+     * teaches a returning visitor that the badge means "Marco uploaded
+     * today" rather than "you have not heard this yet".
+     *
+     * Two weeks is long enough that somebody who visits monthly still finds
+     * something marked, and short enough that the badge is never on most of
+     * the page. A marker that is always lit stops being read — same reason
+     * the notification dot in the panel is not permanent.
+     */
+    public const NEW_FOR_DAYS = 14;
+
+    public function isNew(): bool
+    {
+        return $this->isPublished()
+            && $this->published_at->isAfter(now()->subDays(self::NEW_FOR_DAYS));
+    }
+
     public function isUnderClaim(): bool
     {
         return $this->status === self::STATUS_CLAIMED;

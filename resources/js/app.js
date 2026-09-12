@@ -18,7 +18,7 @@ Chart.register(
 
 // The design tokens, so a chart can never drift from the rest of the panel.
 const PALETTE = {
-    brand: '#a32eb7',
+    brand: '#8a43fd',
     action: '#f9510f',
     info: '#03a3e1',
     success: '#89d206',

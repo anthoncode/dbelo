@@ -177,7 +177,7 @@ class Appearance
 
             /*
              * The brand shadows carry the colour too — app.css writes them
-             * as rgb(163 46 183 / …), which is the same purple spelled a
+             * as rgb(138 67 253 / …), which is the same purple spelled a
              * second way. Recomputing them here is what stops a repainted
              * brand from leaving its own glow behind in the old colour on
              * every primary card and button.
@@ -214,7 +214,7 @@ class Appearance
         return preg_match('/^#[0-9a-f]{6}$/i', $value) ? strtolower($value) : null;
     }
 
-    /** "#a32eb7" → "163 46 183", the space-separated form modern CSS wants. */
+    /** "#8a43fd" → "138 67 253", the space-separated form modern CSS wants. */
     private static function rgb(string $hex): ?string
     {
         if (! preg_match('/^#([0-9a-f]{6})$/i', $hex, $m)) {

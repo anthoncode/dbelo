@@ -24,7 +24,7 @@
     /* --- The three brand colours --- */
     --color-paper: #f5f4fa;     /* light background, text on dark surfaces */
     --color-ink: #1f1d33;       /* dark cards, dark background, text */
-    --color-brand: #a32eb7;     /* logo, action, playhead, PRO */
+    --color-brand: #8a43fd;     /* logo, action, playhead, PRO */
 
     /* --- Surfaces (derived, not new colours) --- */
     --color-surface: #ffffff;        /* light card */
@@ -61,8 +61,8 @@
     --shadow-soft-md: 0 10px 28px -10px rgb(31 29 51 / 0.20);
     --shadow-soft-lg: 0 24px 60px -22px rgb(31 29 51 / 0.30);
     --shadow-float: 0 6px 20px -6px rgb(31 29 51 / 0.18);
-    --shadow-brand: 0 8px 22px -8px rgb(163 46 183 / 0.65);
-    --shadow-brand-lg: 0 14px 32px -10px rgb(163 46 183 / 0.85);
+    --shadow-brand: 0 8px 22px -8px rgb(138 67 253 / 0.65);
+    --shadow-brand-lg: 0 14px 32px -10px rgb(138 67 253 / 0.85);
 
     /* Dark mode needs darker shadows: a light one is invisible there. */
     --shadow-night-sm: 0 2px 8px -2px rgb(0 0 0 / 0.40);

@@ -5,10 +5,19 @@
     'thickness' => 'w-px',
     'button' => 'size-10',
     'showTime' => true,
+
+    /*
+     * The NEW badge on the play button. Null means "decide from the sound",
+     * which is what every caller wants; pass false to force it off where a
+     * row is already about newness and the badge would be on all of them.
+     */
+    'showNew' => null,
 ])
 
 @php
     use Illuminate\Support\Facades\Storage;
+
+    $showNew ??= $sound->isNew();
 
     $preview = $sound->files->firstWhere('purpose', 'preview');
     $src = $preview ? Storage::disk($preview->disk)->url($preview->path) : null;
@@ -107,6 +116,33 @@
         <span x-show="playing" style="display: none" class="absolute inset-0 grid place-items-center">
             <x-icon name="pause" style="solid" class="text-[0.95rem] leading-none" />
         </span>
+
+        {{--
+            NEW.
+
+            On the play button rather than beside the title, because the play
+            button is the one thing the eye already lands on in every row and
+            a badge there costs no extra space in a layout that has none.
+
+            Green, and NOT white text on it. #89d206 is a bright lime: white
+            on it lands around 2:1 contrast, which is unreadable at 8px. Ink
+            on the same green is about 11:1. The rule of thumb holds for the
+            whole palette — the lighter a semantic colour is, the more it
+            wants dark text rather than white.
+
+            Not brand: the circle underneath is brand, and a brand badge on a
+            brand button disappears. Not PRO's colour either — that badge is
+            brand because it marks identity, a tier. This one marks time, and
+            it goes away by itself.
+
+            pointer-events-none so the badge can never eat the click that the
+            whole control exists for.
+        --}}
+        @if ($showNew)
+            <span class="pointer-events-none absolute -right-1.5 -top-1 rounded-full bg-success px-1.5 py-px text-[8px] font-semibold uppercase tracking-[0.06em] text-ink shadow-soft-sm">
+                New
+            </span>
+        @endif
     </button>
 
     @if ($heights)

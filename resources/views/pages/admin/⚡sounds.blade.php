@@ -5,6 +5,7 @@ use App\Models\ActivityLog;
 use App\Models\Category;
 use App\Models\Collection as Pack;
 use App\Models\Sound;
+use App\Models\Tag;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
@@ -39,6 +40,18 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
     public ?int $editing = null;
     public string $editTitle = '';
     public string $editCategory = '';
+
+    /**
+     * Tags, comma separated, exactly as the sound's own edit page takes them.
+     *
+     * They were missing from this row, and that was the wrong side of the
+     * workflow: the only other tag editor is linked from Admin → In review,
+     * which a sound leaves the moment it is published. So a published sound's
+     * tags were effectively frozen unless you knew the URL by heart — and
+     * tagging is precisely what you want to do while looking at the
+     * catalogue together, not before.
+     */
+    public string $editTags = '';
 
     /** Applied by the bulk bar when rows are ticked. */
     public string $bulkCategory = '';
@@ -288,18 +301,22 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
         $this->editing = $id;
         $this->editTitle = $sound->title;
         $this->editCategory = (string) $sound->category_id;
+        $this->editTags = $sound->tags->pluck('name')->join(', ');
         $this->resetErrorBag();
     }
 
     public function cancel(): void
     {
-        $this->reset(['editing', 'editTitle', 'editCategory']);
+        $this->reset(['editing', 'editTitle', 'editCategory', 'editTags']);
         $this->resetErrorBag();
     }
 
     public function update(): void
     {
-        $this->validate(['editTitle' => ['required', 'string', 'min:2', 'max:120']]);
+        $this->validate([
+            'editTitle' => ['required', 'string', 'min:2', 'max:120'],
+            'editTags' => ['nullable', 'string', 'max:255'],
+        ]);
 
         $sound = Sound::findOrFail($this->editing);
 
@@ -310,6 +327,17 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
             'title' => trim($this->editTitle),
             'category_id' => $this->editCategory ?: null,
         ]);
+
+        /*
+         * sync(), so an emptied box removes every tag from THIS sound. The
+         * tag rows themselves survive — they belong to the catalogue, not to
+         * one recording, and deleting "thunder" because one sound stopped
+         * using it would take it off every other sound's page too.
+         *
+         * Parsed by Tag::idsFromList so this row and the sound's own edit
+         * page can never disagree about what a comma means.
+         */
+        $sound->tags()->sync(Tag::idsFromList($this->editTags));
 
         $this->cancel();
         $this->refresh();
@@ -634,6 +662,29 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
                                         <input type="text" wire:model="editTitle" autofocus wire:keydown.enter="update"
                                                class="w-full rounded-lg border-0 bg-panel px-3.5 py-2.5 text-[0.9rem] text-paper focus:outline-none focus:ring-2 focus:ring-brand/40" />
                                         @error('editTitle') <p class="text-[0.8rem] text-danger">{{ $message }}</p> @enderror
+
+                                        {{-- Tags.
+
+                                             A plain comma-separated box rather than a
+                                             picker, and the same one the sound's own edit
+                                             page uses. Typing a name that does not exist
+                                             creates it; clearing one out of the list
+                                             detaches it from this sound and leaves the tag
+                                             itself alone.
+
+                                             Enter saves, like the title above it — the
+                                             whole point of editing in the row is not
+                                             reaching for the mouse. --}}
+                                        <div class="relative">
+                                            <x-icon name="tag" style="solid"
+                                                    class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[0.72rem] text-paper/25" />
+
+                                            <input type="text" wire:model="editTags" wire:keydown.enter="update"
+                                                   placeholder="thunder, storm, rumble, distant — separated by commas"
+                                                   maxlength="255" autocomplete="off"
+                                                   class="w-full rounded-lg border-0 bg-panel py-2.5 pl-9 pr-3.5 text-[0.85rem] text-paper placeholder:text-paper/25 focus:outline-none focus:ring-2 focus:ring-brand/40" />
+                                        </div>
+                                        @error('editTags') <p class="text-[0.8rem] text-danger">{{ $message }}</p> @enderror
 
                                         <div class="flex flex-wrap items-center gap-2">
                                             <select wire:model="editCategory"

@@ -99,19 +99,16 @@ new #[Layout('layouts.site')] #[Title('Edit sound')] class extends Component {
         session()->flash('saved', 'Changes saved.');
     }
 
+    /**
+     * The parsing moved to Tag::idsFromList().
+     *
+     * Admin → Sounds now edits tags from its own inline row, and a rule
+     * written in two screens is a rule that disagrees the first time one of
+     * them is fixed. One definition; both callers.
+     */
     protected function syncTags(): void
     {
-        $ids = collect(explode(',', $this->tags))
-            ->map(fn ($t) => trim($t))
-            ->filter()
-            ->unique()
-            ->take(20)
-            ->map(fn ($name) => Tag::firstOrCreate(
-                ['slug' => Str::slug($name)],
-                ['name' => $name]
-            )->id);
-
-        $this->sound->tags()->sync($ids);
+        $this->sound->tags()->sync(Tag::idsFromList($this->tags));
     }
 
     public function delete(): void

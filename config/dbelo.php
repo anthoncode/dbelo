@@ -244,7 +244,7 @@ return [
     |
     | THE TWO COLOURS MIRROR resources/css/app.css, and that file is the real
     | source of truth. They are repeated here only so the colour picker has
-    | somewhere to start and can print "Built in: #a32eb7" — nothing reads
+    | somewhere to start and can print "Built in: #8a43fd" — nothing reads
     | them to paint anything. Appearance::styleTag() emits an override ONLY
     | for a colour somebody actually changed, so an untouched palette is
     | still defined in exactly one place.
@@ -257,7 +257,7 @@ return [
         'favicon' => null,
         'social_image' => null,
 
-        'brand_color' => '#a32eb7',
+        'brand_color' => '#8a43fd',
         'action_color' => '#f9510f',
     ],
 

@@ -29,7 +29,7 @@
                        style="max-width:520px; background:#ffffff; border-radius:14px; overflow:hidden; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
 
                     <tr>
-                        <td style="background:#a32eb7; padding:18px 28px; color:#ffffff; font-size:13px; letter-spacing:.16em; text-transform:uppercase;">
+                        <td style="background:#8a43fd; padding:18px 28px; color:#ffffff; font-size:13px; letter-spacing:.16em; text-transform:uppercase;">
                             {{ config('app.name', 'dbelo') }}
                         </td>
                     </tr>

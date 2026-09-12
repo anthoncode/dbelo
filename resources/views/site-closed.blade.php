@@ -21,7 +21,7 @@
         :root {
             --ink: #0d0b10;
             --paper: #f4f1f6;
-            --brand: #a32eb7;
+            --brand: #8a43fd;
             --action: #f9510f;
             --info: #03a3e1;
             --warning: #ffa314;
@@ -51,7 +51,7 @@
             position: fixed;
             inset: 0;
             background:
-                radial-gradient(60rem 40rem at 20% -10%, rgba(163, 46, 183, 0.18), transparent 70%),
+                radial-gradient(60rem 40rem at 20% -10%, rgba(138, 67, 253, 0.18), transparent 70%),
                 radial-gradient(45rem 30rem at 100% 110%, rgba(249, 81, 15, 0.12), transparent 70%);
             pointer-events: none;
         }

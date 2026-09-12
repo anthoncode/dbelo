@@ -56,7 +56,7 @@ new #[Layout('layouts.admin')] #[Title('Appearance')] class extends Component {
             // which wraps into the picture and reads badly.
             'values.login_title' => ['nullable', 'string', 'max:80'],
         ], [
-            'values.*.regex' => 'Use a six-digit hex colour, like #a32eb7.',
+            'values.*.regex' => 'Use a six-digit hex colour, like #8a43fd.',
             'values.login_title.max' => 'Keep the headline under 80 characters — it is one line over a picture.',
         ]);
 
@@ -75,7 +75,7 @@ new #[Layout('layouts.admin')] #[Title('Appearance')] class extends Component {
             /*
              * Case-folding belongs to colours and to nothing else.
              *
-             * #A32EB7 and #a32eb7 are one value and should not read as a
+             * #8A43FD and #8a43fd are one value and should not read as a
              * change, so both sides are lowered before comparing. A
              * headline is prose: lowering it would quietly turn "New in
              * dbelo" into "new in dbelo" on the way to the database, and

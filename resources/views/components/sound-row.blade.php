@@ -61,9 +61,17 @@
          part, the names are one hover away and would not fit anyway. --}}
     @if ($sound->relationLoaded('tags') && $sound->tags->isNotEmpty())
         <div class="group/tags relative hidden shrink-0 lg:block">
-            <span class="flex items-center gap-1.5 rounded-full bg-ink/[0.05] px-2.5 py-1 text-[0.72rem] text-ink/50 dark:bg-paper/[0.08] dark:text-paper/50">
-                <x-icon name="tag" style="solid" class="text-[0.6rem]" />
-                {{ $sound->tags->count() }}
+            {{-- No tag icon.
+
+                 A 0.6rem glyph next to a 0.72rem number sat on its own
+                 baseline and made the pill look assembled from two different
+                 sizes, and it told nobody anything the number did not.
+
+                 The first tag NAME rather than a bare count, for the same
+                 reason: "crowd" is information, "3" is a number you have to
+                 hover to understand. The rest are still one hover away. --}}
+            <span class="rounded-full bg-ink/[0.05] px-2.5 py-1 text-[0.72rem] text-ink/50 dark:bg-paper/[0.08] dark:text-paper/50">
+                {{ $sound->tags->first()->name }}@if ($sound->tags->count() > 1) <span class="text-ink/30 dark:text-paper/30">+{{ $sound->tags->count() - 1 }}</span>@endif
             </span>
 
             <span class="pointer-events-none absolute bottom-full left-1/2 z-40 mb-2 hidden max-w-64 -translate-x-1/2 whitespace-nowrap rounded-control bg-ink px-3 py-1.5 text-[0.72rem] text-paper opacity-0 shadow-soft-lg transition duration-200 ease-dbelo group-hover/tags:block group-hover/tags:opacity-100 dark:bg-paper dark:text-ink">
