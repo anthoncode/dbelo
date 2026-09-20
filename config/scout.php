@@ -64,6 +64,20 @@ return [
                 'searchableAttributes' => [
                     'title',
                     'tags',
+
+                    /*
+                    | The translated terms, right after the tags they stand in
+                    | for. A Spanish word is as good a signal as the English
+                    | one it mirrors, so it outranks a description match for
+                    | the same reason "tags" does.
+                    |
+                    | A FIELD LEFT OUT OF THIS LIST IS NOT SEARCHED AT ALL.
+                    | Not ranked low — not searched. That is the failure this
+                    | whole feature would die of silently: the column filled,
+                    | the index fed, and every Spanish query still empty.
+                    */
+                    'search_terms',
+
                     'category',
                     'description',
                 ],

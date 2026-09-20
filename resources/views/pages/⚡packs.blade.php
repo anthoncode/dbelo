@@ -38,6 +38,31 @@ new #[Layout('layouts.site')] #[Title('Sound effect packs')] class extends Compo
             ->get();
     }
 
+    /**
+     * Packs that exist but are not on the page.
+     *
+     * ── WHY AN ADMIN SEES A LINE NOBODY ELSE DOES ────────────────────────
+     *
+     * featured() means is_featured AND is_public, and a pack is created
+     * featured-but-hidden on purpose so an empty one is never reachable. The
+     * failure that follows is a quiet one: you build a pack, you forget the
+     * second switch, and the page says "No packs yet" — which reads as "none
+     * exist", not as "yours are hidden".
+     *
+     * The count is only ever computed for an admin, and the notice only ever
+     * rendered for one. A visitor must not learn that there are pages they
+     * cannot see.
+     */
+    #[Computed]
+    public function hiddenCount(): int
+    {
+        if (! auth()->user()?->isAdmin()) {
+            return 0;
+        }
+
+        return Pack::packs()->where('is_public', false)->count();
+    }
+
     public function iconFor($pack): string
     {
         return self::ICONS[$pack->slug] ?? 'box-open';
@@ -63,6 +88,22 @@ new #[Layout('layouts.site')] #[Title('Sound effect packs')] class extends Compo
         </p>
     </section>
 
+    @if ($this->hiddenCount > 0)
+        <div class="mb-6 flex flex-wrap items-center gap-3 rounded-card bg-warning/[0.08] px-5 py-4 text-[0.88rem]">
+            <x-icon name="eye-slash" style="solid" class="text-[0.8rem] text-warning" />
+            <span>
+                {{ $this->hiddenCount }} {{ Str::plural('pack', $this->hiddenCount) }}
+                {{ $this->hiddenCount === 1 ? 'is' : 'are' }} not public yet, so
+                {{ $this->hiddenCount === 1 ? 'it does' : 'they do' }} not appear here.
+            </span>
+            <a href="{{ route('admin.packs') }}" wire:navigate
+               class="ml-auto inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-[0.8rem] text-paper transition hover:-translate-y-0.5 dark:bg-paper/10">
+                Manage packs
+                <x-icon name="arrow-right" style="solid" class="text-[0.66rem]" />
+            </a>
+        </div>
+    @endif
+
     @if ($this->packs->isEmpty())
         <div class="rounded-card bg-surface py-20 text-center shadow-soft-md dark:bg-surface-dark">
             <x-icon name="box-open" style="regular" class="text-[28px] text-ink/15 dark:text-paper/15" />
@@ -77,15 +118,15 @@ new #[Layout('layouts.site')] #[Title('Sound effect packs')] class extends Compo
             </a>
         </div>
     @else
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {{-- Covers rather than tiles. A pack is a thing you choose by the
+             look of it; a text row is a thing you read, and twelve text rows
+             is a list of names nobody picks from. --}}
+        <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             @foreach ($this->packs as $i => $pack)
-                <x-tile :href="route('packs.show', $pack)"
-                        :title="$pack->name"
-                        :subtitle="Str::limit($pack->description, 110)"
-                        :icon="$this->iconFor($pack)"
-                        :meta="$pack->sounds_count.' '.Str::plural('sound', $pack->sounds_count)"
-                        :delay="50 * $i"
-                        wire:key="pack-{{ $pack->id }}" />
+                <x-pack-card :pack="$pack"
+                             :icon="$this->iconFor($pack)"
+                             :delay="50 * $i"
+                             wire:key="pack-{{ $pack->id }}" />
             @endforeach
         </div>
     @endif

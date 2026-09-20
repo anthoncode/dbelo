@@ -27,6 +27,21 @@ new #[Layout('layouts.site')] #[Title('Copyright complaint')] class extends Comp
         // Arriving from a sound page pre-fills the URL, which is the field
         // people get wrong most often.
         $this->sound_url = (string) request()->query('url', '');
+
+        /*
+         * The title arrives from #[Title] above. The description did not,
+         * so this page introduced itself with the sentence written for the
+         * catalogue — to somebody who is here because they believe dbelo is
+         * hosting their work, which is the worst possible moment to sound
+         * like a shop front.
+         *
+         * Only the description is shared: array_merge in partials/head lets
+         * a page override one key and inherit the rest.
+         */
+        view()->share('seo', [
+            'description' => 'Report a sound on dbelo that uses your work without permission. '
+                .'One form, a reference number you keep, and an answer from a person.',
+        ]);
     }
 
     /**

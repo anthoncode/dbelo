@@ -5,6 +5,8 @@ namespace App\Jobs;
 use App\Models\Sound;
 use App\Models\SoundFile;
 use App\Services\AudioProcessor;
+use App\Support\AutoTags;
+use App\Support\Suggestions;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
@@ -137,6 +139,60 @@ class ProcessSoundUpload implements ShouldQueue
             'processing_error' => null,
             'processed_at' => now(),
         ]);
+
+        /*
+         * 6. Tags, before anything else has a chance not to happen.
+         *
+         * Taken from the title and the category, so they cost nothing, need
+         * no API key and cannot be invented — every word is already in the
+         * data. A sound with no tags is a sound the search barely finds, and
+         * that state must not depend on a model answering.
+         *
+         * Tops up only: never removes a tag, and does nothing at all if the
+         * sound already has three. The suggester adds its own on top later.
+         */
+        try {
+            AutoTags::topUp($this->sound);
+        } catch (Throwable $e) {
+            Log::warning('Could not auto-tag sound', [
+                'sound' => $this->sound->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        /*
+         * 7. Ask a model for better tags, a category and a description.
+         *
+         * The tags it returns ARE written to the sound. The description and
+         * the category are not — they wait in review, because a false
+         * sentence on a public page costs more than a loose tag in a search
+         * box. SuggestSoundMetadata has the full argument.
+         *
+         * ── WHY THE READY() CHECK BEFORE DISPATCHING ─────────────────────
+         *
+         * With no API key the job would throw notConfigured on every single
+         * upload, and fifty files would leave fifty rows in failed_jobs — a
+         * table that has already misled us once on this project by looking
+         * alarming when nothing was actually broken. A missing key is a
+         * normal state, so it must not manufacture failures.
+         *
+         * The job checks again when it runs, because a key can be removed in
+         * the minutes between this line and the worker picking it up.
+         *
+         * Wrapped, because a suggestion is the least important thing that
+         * happens in this method. A sound whose conversion worked must never
+         * be marked failed because an optional extra threw.
+         */
+        try {
+            if (Suggestions::ready()) {
+                SuggestSoundMetadata::dispatch($this->sound->id);
+            }
+        } catch (Throwable $e) {
+            Log::warning('Could not queue metadata suggestions', [
+                'sound' => $this->sound->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

@@ -57,28 +57,20 @@
         </div>
     </div>
 
-    {{-- Tag count, the way the reference does it: the number is the useful
-         part, the names are one hover away and would not fit anyway. --}}
-    @if ($sound->relationLoaded('tags') && $sound->tags->isNotEmpty())
-        <div class="group/tags relative hidden shrink-0 lg:block">
-            {{-- No tag icon.
+    {{-- NO TAG PILL HERE, and this is the second thing removed from that
+         spot rather than a gap nobody filled.
 
-                 A 0.6rem glyph next to a 0.72rem number sat on its own
-                 baseline and made the pill look assembled from two different
-                 sizes, and it told nobody anything the number did not.
+         It showed the first tag and a "+N" for the rest. That read fine when
+         a sound had three tags; once the suggester started returning ten it
+         became "crowd +9", where the number is bigger than the word and says
+         nothing — and the muted +N sat at a third opacity beside a half
+         opacity name, so one pill carried two greys and broke the line.
 
-                 The first tag NAME rather than a bare count, for the same
-                 reason: "crowd" is information, "3" is a number you have to
-                 hover to understand. The rest are still one hover away. --}}
-            <span class="rounded-full bg-ink/[0.05] px-2.5 py-1 text-[0.72rem] text-ink/50 dark:bg-paper/[0.08] dark:text-paper/50">
-                {{ $sound->tags->first()->name }}@if ($sound->tags->count() > 1) <span class="text-ink/30 dark:text-paper/30">+{{ $sound->tags->count() - 1 }}</span>@endif
-            </span>
-
-            <span class="pointer-events-none absolute bottom-full left-1/2 z-40 mb-2 hidden max-w-64 -translate-x-1/2 whitespace-nowrap rounded-control bg-ink px-3 py-1.5 text-[0.72rem] text-paper opacity-0 shadow-soft-lg transition duration-200 ease-dbelo group-hover/tags:block group-hover/tags:opacity-100 dark:bg-paper dark:text-ink">
-                {{ $sound->tags->take(6)->pluck('name')->join(' · ') }}
-            </span>
-        </div>
-    @endif
+         The tags still exist, still drive the search, and are still on the
+         sound's own page. A row in a list is for choosing WHICH sound to open;
+         it needs a title, a shape and a play button, and every extra thing in
+         it competes with those three.
+         --}}
 
     <x-waveform-player :sound="$sound" :bars="$bars" class="min-w-0 flex-1" />
 

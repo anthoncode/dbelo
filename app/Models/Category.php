@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\FooterLinks;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -9,6 +10,17 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Category extends Model
 {
     protected $guarded = [];
+
+    /**
+     * The footer lists the first six top-level categories and caches their
+     * names for an hour. Renaming one, or changing the order, should show up
+     * on the site immediately — not "sometime today".
+     */
+    protected static function booted(): void
+    {
+        static::saved(fn () => FooterLinks::flush());
+        static::deleted(fn () => FooterLinks::flush());
+    }
 
     public function sounds(): HasMany
     {

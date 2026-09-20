@@ -25,3 +25,8 @@ yarn-error.log
 
 .DS_Store
 **/.DS_Store
+
+# Copias locales del entorno. `.env` ya está arriba; esto cubre las copias
+# con otro nombre, que es exactamente como entró un secreto al repositorio.
+/env.*
+!/env.*.example

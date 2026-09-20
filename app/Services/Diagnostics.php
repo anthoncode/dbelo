@@ -49,6 +49,7 @@ class Diagnostics
             'siteStatus', 'settingsWired',
             'appKey', 'appDebug', 'configCache',
             'database', 'pendingMigrations',
+            'counterDrift', 'soundsWithoutFiles', 'orphanRows', 'tableSizes',
             'queueDriver', 'scheduler',
             'mailDriver',
             'backupAge',
@@ -376,6 +377,260 @@ class Diagnostics
 
         return $this->make('db.migrations', 'Database', 'Migrations', self::OK,
             $files->count().' applied, none pending.');
+    }
+
+    /* ═══════════════════════════ Data health ═══════════════════════════
+     *
+     * A different kind of wrong from everything above.
+     *
+     * The checks up to here ask whether the environment matches the code:
+     * is the database reachable, is its shape current, is the queue being
+     * consumed. These ask whether the DATA INSIDE IT still agrees with
+     * itself — a counter that drifted, a published sound whose file is
+     * gone, a row pointing at something that was deleted.
+     *
+     * ── THEY REPORT. THEY DO NOT REPAIR. ─────────────────────────────────
+     *
+     * There is no button here and that is the design. A button that fixes
+     * data is a button that DELETES data, and "orphan" is a word that means
+     * whatever the query defining it says it means — get that query subtly
+     * wrong and the button removes rows that were fine, with no undo short
+     * of restoring a backup. The cost of being told a number and acting on
+     * it deliberately is a few minutes; the cost of the other mistake is
+     * unbounded.
+     *
+     * So each check prints what it found and the command that would address
+     * it, and a person decides. Counters are the one thing genuinely safe to
+     * recompute — the correct value can always be derived again — and even
+     * that is offered as a command rather than a click.
+     *
+     * ── EVERY QUERY HERE IS AN AGGREGATE ─────────────────────────────────
+     *
+     * No row is ever loaded. These run on a screen somebody opens when they
+     * already suspect a problem, which is the worst moment to make the
+     * database do real work, so each is a single COUNT or GROUP BY and the
+     * whole section is cached for five minutes.
+     * ═══════════════════════════════════════════════════════════════════ */
+
+    /**
+     * Denormalised counters that no longer match what they count.
+     *
+     * downloads_count and favorites_count are columns kept in step by hand.
+     * Anything that removes a row without going through the code that
+     * decrements them — a manual DELETE, a cascade, a restored backup —
+     * leaves the number lying, and nothing anywhere notices. The catalogue
+     * then sorts "most downloaded" by a figure that is quietly wrong.
+     *
+     * plays_count is NOT checked, and cannot be: nothing records individual
+     * plays, so there is no truth to compare it against. Worth knowing
+     * rather than worth fixing.
+     */
+    private function counterDrift(): ?array
+    {
+        if (! Schema::hasTable('sounds') || ! Schema::hasTable('downloads')) {
+            return null;
+        }
+
+        $drift = Cache::remember('diagnostics.counter.drift', now()->addMinutes(5), function () {
+            $downloads = DB::table('sounds')
+                ->whereNull('deleted_at')
+                ->whereRaw('downloads_count <> (select count(*) from downloads where downloads.sound_id = sounds.id)')
+                ->count();
+
+            $favourites = Schema::hasTable('favorites')
+                ? DB::table('sounds')
+                    ->whereNull('deleted_at')
+                    ->whereRaw('favorites_count <> (select count(*) from favorites where favorites.sound_id = sounds.id)')
+                    ->count()
+                : 0;
+
+            return ['downloads' => $downloads, 'favourites' => $favourites];
+        });
+
+        $total = $drift['downloads'] + $drift['favourites'];
+
+        if ($total === 0) {
+            return $this->make('data.counters', 'Data health', 'Counters', self::OK,
+                'Download and favourite counts match their tables.');
+        }
+
+        return $this->make('data.counters', 'Data health', 'Counters', self::WARN,
+            $drift['downloads'].' sounds with a wrong download count, '
+                .$drift['favourites'].' with a wrong favourite count.',
+            fix: 'The catalogue sorts and displays these numbers, so they are visibly wrong to visitors. Recomputing is safe — the correct value is derived from the rows themselves.',
+            command: 'php artisan sounds:recount');
+    }
+
+    /**
+     * Sounds that are live on the site with nothing to play or download.
+     *
+     * The worst failure in the catalogue and the quietest: the page renders,
+     * the title is there, the waveform may even draw from stored peaks — and
+     * the player is silent, or Download returns nothing. No exception is
+     * thrown, so the Errors screen stays empty and the only person who finds
+     * out is a visitor who leaves.
+     */
+    private function soundsWithoutFiles(): ?array
+    {
+        if (! Schema::hasTable('sounds') || ! Schema::hasTable('sound_files')) {
+            return null;
+        }
+
+        $broken = Cache::remember('diagnostics.sounds.fileless', now()->addMinutes(5), fn () => [
+            'preview' => DB::table('sounds')
+                ->where('status', 'published')
+                ->whereNull('deleted_at')
+                ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from('sound_files')
+                    ->whereColumn('sound_files.sound_id', 'sounds.id')
+                    ->where('purpose', 'preview'))
+                ->count(),
+
+            'download' => DB::table('sounds')
+                ->where('status', 'published')
+                ->whereNull('deleted_at')
+                ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from('sound_files')
+                    ->whereColumn('sound_files.sound_id', 'sounds.id')
+                    ->where('purpose', 'download'))
+                ->count(),
+        ]);
+
+        if ($broken['preview'] === 0 && $broken['download'] === 0) {
+            return $this->make('data.files', 'Data health', 'Published sounds', self::OK,
+                'Every published sound has a preview and a download.');
+        }
+
+        return $this->make('data.files', 'Data health', 'Published sounds', self::FAIL,
+            $broken['preview'].' published with no preview, '.$broken['download'].' with no download file.',
+            fix: 'These pages are live and silent. Either the conversion never finished or the files were removed. Re-running the processing job rebuilds both from the master.',
+            route: 'moderate');
+    }
+
+    /**
+     * Rows pointing at a sound that no longer exists.
+     *
+     * ── THIS SHOULD ALWAYS READ ZERO, AND THAT IS THE POINT ──────────────
+     *
+     * sound_files, downloads, favorites and the tag pivot all declare
+     * `constrained()->cascadeOnDelete()`, so the database itself removes
+     * these the instant a sound is force-deleted. In a healthy install the
+     * number cannot be anything but zero.
+     *
+     * Which makes a non-zero answer worth a great deal more than a tidy-up
+     * job: it means a foreign key is missing or was never enforced. That
+     * happens for real — a table rebuilt by hand, an import that dropped
+     * constraints, SQLite running without foreign_keys ON, a restore from a
+     * dump taken with checks disabled. The orphan rows are the symptom; the
+     * missing constraint is the problem, and it is silently allowing worse
+     * things than these rows.
+     *
+     * So this is not an orphan sweeper. It is a check that the cascades are
+     * still doing their job — which is why it counts and offers nothing that
+     * deletes. Clearing the rows would hide the only evidence that a
+     * constraint is gone.
+     */
+    private function orphanRows(): ?array
+    {
+        if (! Schema::hasTable('sound_files')) {
+            return null;
+        }
+
+        $orphans = Cache::remember('diagnostics.orphans', now()->addMinutes(5), function () {
+            $out = [];
+
+            // A file row whose sound was force-deleted. Soft-deleted sounds
+            // keep their files on purpose — the sound can come back — so
+            // deleted_at is not the test here; existence is.
+            $out['sound_files'] = DB::table('sound_files')
+                ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from('sounds')
+                    ->whereColumn('sounds.id', 'sound_files.sound_id'))
+                ->count();
+
+            if (Schema::hasTable('sound_tag')) {
+                $out['sound_tag'] = DB::table('sound_tag')
+                    ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from('sounds')
+                        ->whereColumn('sounds.id', 'sound_tag.sound_id'))
+                    ->count();
+            }
+
+            foreach (['downloads', 'favorites'] as $table) {
+                if (Schema::hasTable($table)) {
+                    $out[$table] = DB::table($table)
+                        ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from('sounds')
+                            ->whereColumn('sounds.id', $table.'.sound_id'))
+                        ->count();
+                }
+            }
+
+            return array_filter($out);
+        });
+
+        if ($orphans === []) {
+            return $this->make('data.orphans', 'Data health', 'Orphan rows', self::OK,
+                'No rows pointing at a deleted sound.');
+        }
+
+        $parts = [];
+
+        foreach ($orphans as $table => $count) {
+            $parts[] = $count.' in '.$table;
+        }
+
+        return $this->make('data.orphans', 'Data health', 'Orphan rows', self::WARN,
+            implode(', ', $parts).'.',
+            fix: 'These tables cascade on delete, so this should be impossible — a foreign key is probably missing or unenforced. Check the constraints before clearing anything: the rows are the evidence, and a missing constraint allows worse than a few stale rows.');
+    }
+
+    /**
+     * What the database actually weighs, biggest table first.
+     *
+     * Informational, never a failure. It is here because a retention rule is
+     * impossible to judge in the abstract: "should search_daily be kept for
+     * a year" is unanswerable until you can see it is the second largest
+     * table on the system.
+     *
+     * MySQL only. The numbers are the engine's own estimate and can be off
+     * by a chunk on InnoDB — fine for "which one is growing", useless for
+     * anything that needs a precise figure.
+     */
+    private function tableSizes(): ?array
+    {
+        if (DB::connection()->getDriverName() !== 'mysql') {
+            return null;
+        }
+
+        $top = Cache::remember('diagnostics.table.sizes', now()->addMinutes(30), function () {
+            return DB::select(
+                'select table_name as name,
+                        table_rows as rows_estimate,
+                        round((data_length + index_length) / 1024 / 1024, 1) as mb
+                 from information_schema.tables
+                 where table_schema = ?
+                 order by (data_length + index_length) desc
+                 limit 5',
+                [DB::connection()->getDatabaseName()],
+            );
+        });
+
+        if ($top === []) {
+            return null;
+        }
+
+        $total = Cache::remember('diagnostics.db.size', now()->addMinutes(30), function () {
+            return (float) (DB::selectOne(
+                'select round(sum(data_length + index_length) / 1024 / 1024, 1) as mb
+                 from information_schema.tables where table_schema = ?',
+                [DB::connection()->getDatabaseName()],
+            )?->mb ?? 0);
+        });
+
+        $parts = array_map(
+            fn ($row) => $row->name.' '.$row->mb.' MB',
+            array_slice($top, 0, 3),
+        );
+
+        return $this->make('data.size', 'Data health', 'Size', self::OK,
+            $total.' MB total · biggest: '.implode(', ', $parts),
+            fix: 'Retention rules are in each model\'s prunable(). `php artisan model:prune --pretend` says what the nightly clean-up would remove without removing it.');
     }
 
     /* ═══════════════════════════ Background ═══════════════════════════ */

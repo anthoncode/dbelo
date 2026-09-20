@@ -35,13 +35,35 @@ class SitemapController extends Controller
                 'priority' => '0.9',
             ]);
 
-            Category::orderBy('id')->get()->each(function ($category) use ($urls) {
-                $urls->push([
-                    'loc' => route('sounds.index', ['category' => $category->slug]),
-                    'changefreq' => 'weekly',
-                    'priority' => '0.7',
-                ]);
-            });
+            /*
+             * ── ONLY THE CATEGORIES THAT HAVE SOMETHING IN THEM ─────────
+             *
+             * This was every row. With thirteen categories and fifty-five
+             * subcategories, most of them empty on a young catalogue, the
+             * sitemap was inviting Google to crawl dozens of pages that say
+             * "no sounds yet" — which is thin content offered up
+             * deliberately, in the one file whose whole job is to say "these
+             * are the pages worth having".
+             *
+             * The OR is not optional. A parent category's page lists its
+             * children's sounds too — the filter is
+             * category_slug = X OR parent_category_slug = X — so a parent
+             * with nothing of its own and four full children is a full page,
+             * and whereHas('sounds') alone would have dropped it.
+             */
+            Category::query()
+                ->where(fn ($q) => $q
+                    ->whereHas('sounds', fn ($s) => $s->published())
+                    ->orWhereHas('children.sounds', fn ($s) => $s->published()))
+                ->orderBy('id')
+                ->get()
+                ->each(function ($category) use ($urls) {
+                    $urls->push([
+                        'loc' => route('sounds.index', ['category' => $category->slug]),
+                        'changefreq' => 'weekly',
+                        'priority' => '0.7',
+                    ]);
+                });
 
             // Pages and posts. Anything flagged noindex is left out — telling
             // Google "here it is" and "do not index it" at once is a mixed
@@ -79,6 +101,33 @@ class SitemapController extends Controller
                     'loc' => route('converter.pair', $pair),
                     'changefreq' => 'monthly',
                     'priority' => '0.7',
+                ]);
+            }
+
+            /*
+             * The legal pages and the copyright form.
+             *
+             * Missing until now for the same reason packs were: they were
+             * built after this file and nobody came back. All five are
+             * public, indexable and permanent — /licenses in particular is
+             * the answer to "can I use this sound commercially", which is a
+             * real search — and a page Google cannot see cannot answer it.
+             *
+             * Low changefreq because they genuinely do not change, and a
+             * sitemap that cries weekly about a page that has not moved in a
+             * year is a sitemap Google learns to discount.
+             */
+            foreach ([
+                'legal.licenses' => '0.6',
+                'legal.terms' => '0.4',
+                'legal.privacy' => '0.4',
+                'legal.contributor' => '0.4',
+                'claims.create' => '0.4',
+            ] as $name => $priority) {
+                $urls->push([
+                    'loc' => route($name),
+                    'changefreq' => 'yearly',
+                    'priority' => $priority,
                 ]);
             }
 

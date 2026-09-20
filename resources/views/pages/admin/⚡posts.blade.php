@@ -56,6 +56,29 @@ new #[Layout('layouts.admin')] #[Title('Content')] class extends Component {
             ->paginate(10);
     }
 
+    /* ── The footer column, on the pages screen ───────────────────────── */
+
+    /**
+     * The ids the footer is drawing, and how many asked to be.
+     *
+     * Both come from Post, which is where the rule lives. Rewriting the
+     * query here would give this screen its own opinion about what is in the
+     * footer, and the day the rule changed only one of the two would know.
+     *
+     * @return array<int, int>
+     */
+    #[Computed]
+    public function footerIds(): array
+    {
+        return $this->isBlog ? [] : Post::footerPageIds();
+    }
+
+    #[Computed]
+    public function footerWanted(): int
+    {
+        return $this->isBlog ? 0 : Post::footerPagesWanted();
+    }
+
     #[Computed]
     public function categoryOptions()
     {
@@ -83,7 +106,7 @@ new #[Layout('layouts.admin')] #[Title('Content')] class extends Component {
 
         ActivityLog::record('post.deleted', $post, ucfirst($this->type).": {$post->title} deleted");
 
-        unset($this->posts, $this->counts);
+        unset($this->posts, $this->counts, $this->footerIds, $this->footerWanted);
         session()->flash('ok', "“{$post->title}” deleted.");
     }
 
@@ -100,7 +123,7 @@ new #[Layout('layouts.admin')] #[Title('Content')] class extends Component {
 
         $copy->tags()->sync($post->tags->pluck('id'));
 
-        unset($this->posts, $this->counts);
+        unset($this->posts, $this->counts, $this->footerIds, $this->footerWanted);
 
         $this->redirectRoute($this->isBlog ? 'admin.blog.edit' : 'admin.pages.edit', $copy, navigate: true);
     }
@@ -163,6 +186,22 @@ new #[Layout('layouts.admin')] #[Title('Content')] class extends Component {
             </div>
         </div>
 
+        {{-- ── MORE PAGES WANT THE FOOTER THAN FIT ──────────────────────
+             Only drawn when it is true, and it names the number rather than
+             saying "some". The alternative is a tick box that silently does
+             nothing on two rows and no way to find out which two. --}}
+        @unless ($this->isBlog)
+            @if ($this->footerWanted > \App\Models\Post::FOOTER_MAX)
+                <div class="mx-5 mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-warning/[0.08] px-4 py-3 text-[0.8rem] text-warning">
+                    <x-icon name="triangle-exclamation" style="solid" class="text-[0.8rem]" />
+                    <span>
+                        {{ $this->footerWanted }} pages are ticked for the footer and it draws
+                        {{ \App\Models\Post::FOOTER_MAX }}. The ones marked
+                        <span class="font-medium">not shown</span> below are live, in the sitemap, and not in the footer.
+                    </span>
+                </div>
+            @endif
+        @endunless
 
         <table class="w-full text-left">
             <thead>
@@ -221,7 +260,34 @@ new #[Layout('layouts.admin')] #[Title('Content')] class extends Component {
                                 @endif
                             </td>
                         @else
-                            <td class="px-3 py-3 font-mono text-[0.75rem] text-paper/40">/{{ $post->slug }}</td>
+                            <td class="px-3 py-3">
+                                <div class="font-mono text-[0.75rem] text-paper/40">/{{ $post->slug }}</div>
+
+                                {{-- Whether the footer is actually drawing
+                                     this page, read from the same list the
+                                     footer itself renders — not from a
+                                     second copy of the rule. --}}
+                                @if ($post->in_footer)
+                                    @if (in_array($post->id, $this->footerIds, true))
+                                        <span class="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-raised px-2 py-0.5 text-[0.68rem] text-paper/45">
+                                            <x-icon name="anchor" style="solid" class="text-[0.6rem]" />
+                                            Footer · {{ $post->sort_order }}
+                                        </span>
+                                    @else
+                                        <span class="group/tip relative mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-warning/15 px-2 py-0.5 text-[0.68rem] text-warning">
+                                            <x-icon name="eye-slash" style="solid" class="text-[0.6rem]" />
+                                            Footer · not shown
+                                            <span class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 whitespace-nowrap rounded-lg bg-paper px-2.5 py-1 text-[0.7rem] font-medium text-ink opacity-0 shadow-xl transition group-hover/tip:opacity-100">
+                                                @if (! $post->isLive())
+                                                    Not published yet
+                                                @else
+                                                    Past the first {{ \App\Models\Post::FOOTER_MAX }}
+                                                @endif
+                                            </span>
+                                        </span>
+                                    @endif
+                                @endif
+                            </td>
                         @endif
 
                         <td class="px-3 py-3">

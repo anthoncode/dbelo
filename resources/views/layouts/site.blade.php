@@ -37,7 +37,18 @@
     @php
         $navLinks = array_values(array_filter([
             ['Browse', route('sounds.index'), 'sounds.*'],
-            \App\Models\Collection::featured()->exists() ? ['Packs', route('packs.index'), 'packs.*'] : null,
+            // Through FooterLinks rather than straight at the model: the
+            // footer below asks these same two questions on this same page,
+            // and the answer is cached there. Two live queries per page view
+            // for one fact is the smaller half of it — the bigger half is
+            // that two callers can disagree, and "Packs in the header, no
+            // Packs in the footer" is a bug nobody would think to look for.
+            // The cache is dropped whenever a collection is saved.
+            \App\Support\FooterLinks::hasPacks() ? ['Packs', route('packs.index'), 'packs.*'] : null,
+            // Same rule as Packs: a nav entry leading to an empty page is
+            // worse than no entry, and nothing is listed until somebody
+            // chooses to list it.
+            \App\Support\FooterLinks::hasListedCollections() ? ['Collections', route('collections.index'), 'collections.index'] : null,
             \App\Models\Post::blogHasPosts() ? ['Blog', route('blog'), 'blog*'] : null,
             // The converter was reachable only by typing its URL. It is a
             // page built to bring strangers in, and nothing on the site
@@ -382,54 +393,142 @@
         {{ $slot }}
     </main>
 
-    <footer class="mx-auto mt-16 max-w-[1160px] border-t border-ink/[0.07] px-6 py-10 pb-32 dark:border-paper/10">
-        {{-- The paragraph from Admin → Settings → General.
-             Hidden entirely when empty rather than left as a blank gap: the
-             footer has to look finished with the setting untouched. --}}
-        @if (filled(config('dbelo.site.footer')))
-            <p class="mb-6 max-w-[62ch] text-sm leading-relaxed text-ink/45 dark:text-paper/45">
-                {{ config('dbelo.site.footer') }}
-            </p>
-        @endif
+    {{--
+        ══════════════════════════════════════════════════════════════════
+        THE FOOTER
+        ══════════════════════════════════════════════════════════════════
 
-        <div class="flex flex-wrap items-center justify-between gap-4 text-sm text-ink/45 dark:text-paper/45">
-            {{-- The name comes from config, not from the word "dbelo" typed
-                 here. That literal is exactly why the Site name field looked
-                 like it did nothing: the title changed and the footer did
-                 not, on the same page. --}}
-            <span>&copy; {{ date('Y') }} {{ config('app.name', 'dbelo') }} — sound effects library</span>
+        WHAT IT WAS: one paragraph, a copyright, and a single row of links —
+        four nav items, a middle dot, five legal pages, and every page the
+        operator had published tacked on the end. Twelve links in a line, in
+        which "Privacy" and "About" and "Converter" were typographically the
+        same thing, and the only thing that could ever happen to it was a
+        thirteenth.
 
-            {{-- Where the navigation went.
+        WHAT IT IS: four columns with names on them, built by
+        App\Support\FooterLinks. The grouping is the point. Nobody looks for
+        the terms of use in the same moment they look for the converter, and
+        a list that mixes the two teaches the eye to skip the whole block.
 
-                 These four leave the bar below md, so the footer is now the
-                 only place a phone can reach Packs, the Blog or the
-                 converter. That makes it navigation rather than decoration,
-                 and it is listed first for the same reason. --}}
-            <nav class="flex flex-wrap gap-5">
-                @foreach ($navLinks as [$label, $href, $pattern])
-                    <a href="{{ $href }}" wire:navigate
-                       class="font-medium text-ink/60 transition hover:text-brand dark:text-paper/60">{{ $label }}</a>
+        WHY THE LINKS ARE NOT LISTED HERE: because deciding what to show is
+        five conditionals and three queries — is there a blog yet, is
+        anything in the directory, which categories have sounds — and this is
+        a Blade file where a raw PHP block cannot safely meet an inline one.
+        The layout draws; FooterLinks decides.
+
+        WHY IT MATTERS MORE THAN A FOOTER USUALLY DOES: it is on every page,
+        which makes it the only place from which every page links to the
+        category hubs and to the converter pair pages. Those were written to
+        bring strangers in and had almost nothing pointing at them from
+        inside the site.
+
+        pb-32 stays: the player bar is fixed to the bottom on a phone and
+        would otherwise sit on top of the last column.
+    --}}
+    <footer class="mx-auto mt-16 max-w-[1160px] border-t border-ink/[0.07] px-6 py-12 pb-32 dark:border-paper/10">
+
+        <div class="flex flex-col gap-12 lg:flex-row lg:gap-20">
+
+            {{-- ══════════════════════════════════════════════════════════
+                 THE MARK AND THE SENTENCE
+
+                 Same component as the header, not a copy of it: one logo,
+                 one place it is defined, and the footer cannot drift from
+                 the bar the day a new file is uploaded.
+                 ══════════════════════════════════════════════════════════ --}}
+            <div class="lg:w-[19rem] lg:shrink-0">
+                <div class="-ml-1 inline-flex">
+                    <x-site-logo />
+                </div>
+
+                {{-- The paragraph from Admin → Settings → General.
+                     Hidden entirely when empty rather than left as a blank
+                     gap: the footer has to look finished with the setting
+                     untouched. --}}
+                @if (filled(config('dbelo.site.footer')))
+                    <p class="mt-5 max-w-[42ch] text-[0.86rem] leading-relaxed text-ink/45 dark:text-paper/45">
+                        {{ config('dbelo.site.footer') }}
+                    </p>
+                @endif
+            </div>
+
+            {{-- ══════════════════════════════════════════════════════════
+                 THE COLUMNS
+
+                 Two across on a phone, four from sm up. The count is not
+                 hard-coded anywhere: FooterLinks drops a column that has
+                 nothing in it — Resources is empty until the first post or
+                 page exists — and the grid simply has fewer cells.
+
+                 Each column is its own <nav> with a label, so a screen
+                 reader announces "Legal navigation" instead of reading
+                 twenty links as one undifferentiated list.
+                 ══════════════════════════════════════════════════════════ --}}
+            <div class="grid flex-1 grid-cols-2 gap-x-8 gap-y-10 sm:grid-cols-4">
+                @foreach (\App\Support\FooterLinks::columns() as $column)
+                    <nav aria-label="{{ $column['title'] }}" wire:key="footer-col-{{ $loop->index }}">
+                        <h2 class="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-ink/35 dark:text-paper/35">
+                            {{ $column['title'] }}
+                        </h2>
+
+                        <ul class="mt-4 space-y-2.5">
+                            @foreach ($column['links'] as $link)
+                                <li>
+                                    {{-- wire:navigate on everything except
+                                         the RSS feed, which answers with XML
+                                         — see the note on FooterLinks. --}}
+                                    <a href="{{ $link['href'] }}"
+                                       @if ($link['navigate'] ?? true) wire:navigate @endif
+                                       class="text-[0.87rem] text-ink/55 transition duration-300 ease-dbelo hover:text-brand dark:text-paper/55">
+                                        {{ $link['label'] }}
+                                    </a>
+                                </li>
+                            @endforeach
+                        </ul>
+                    </nav>
                 @endforeach
+            </div>
+        </div>
 
-                <span class="hidden text-ink/15 sm:inline dark:text-paper/15">·</span>
+        {{-- ══════════════════════════════════════════════════════════════
+             THE BOTTOM BAR
 
-                <a href="{{ route('legal.licenses') }}" wire:navigate class="transition hover:text-brand">Licenses</a>
-                <a href="{{ route('legal.terms') }}" wire:navigate class="transition hover:text-brand">Terms</a>
-                <a href="{{ route('legal.privacy') }}" wire:navigate class="transition hover:text-brand">Privacy</a>
-                <a href="{{ route('legal.contributor') }}" wire:navigate class="transition hover:text-brand">Contribute</a>
-                <a href="{{ route('claims.create') }}" wire:navigate class="transition hover:text-brand">Copyright</a>
+             flex-col-reverse below sm so the social row sits ABOVE the
+             copyright on a phone: the icons are the thing somebody might
+             tap, and the legal sentence is the thing nobody reads. Source
+             order stays copyright-first, which is the order that makes sense
+             to a screen reader.
+             ══════════════════════════════════════════════════════════════ --}}
+        <div class="mt-12 flex flex-col-reverse items-center gap-6 border-t border-ink/[0.07] pt-7 sm:flex-row sm:justify-between dark:border-paper/10">
 
-                {{-- Pages the admin published, in the order chosen there.
+            @if (filled($footerCopyright = \App\Support\FooterLinks::copyright()))
+                <p class="text-center text-[0.8rem] text-ink/40 sm:text-left dark:text-paper/40">
+                    {{ $footerCopyright }}
+                </p>
+            @endif
 
-                     The loop variable is NOT called $page: the route that
-                     renders a page is `/{page}`, so on that one route the
-                     slug is already in scope under that name and clobbers
-                     the loop. --}}
-                @foreach (\App\Models\Post::footerPages() as $footerPage)
-                    <a href="{{ route('pages.show', $footerPage['slug']) }}" wire:navigate
-                       class="transition hover:text-brand">{{ $footerPage['title'] }}</a>
-                @endforeach
-            </nav>
+            {{-- ── THE PROFILES ─────────────────────────────────────────
+                 Admin → Settings → General → Social profiles. Nothing is
+                 drawn when the list is empty: five grey circles linking to
+                 an account that does not exist yet is worse than no row.
+
+                 rel="me" is the one part worth explaining. It is how a
+                 profile on the other end can verify that this site claims
+                 it back — Mastodon reads it, and it costs an attribute.
+                 noopener is not optional on target="_blank". --}}
+            @if (\App\Support\Social::any())
+                <div class="flex items-center gap-1">
+                    @foreach (\App\Support\Social::links() as $profile)
+                        <a href="{{ $profile['url'] }}"
+                           target="_blank" rel="noopener noreferrer me"
+                           title="{{ $profile['label'] }}" aria-label="{{ $profile['label'] }}"
+                           class="grid size-9 place-items-center rounded-full text-ink/45 transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:bg-ink/[0.06] hover:text-brand dark:text-paper/45 dark:hover:bg-paper/10">
+                            <x-icon :name="$profile['icon']" :style="$profile['brand'] ? 'brands' : 'solid'"
+                                    class="text-[0.95rem]" />
+                        </a>
+                    @endforeach
+                </div>
+            @endif
         </div>
     </footer>
 

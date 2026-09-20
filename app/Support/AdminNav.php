@@ -182,6 +182,11 @@ class AdminNav
                     // advertising off must not switch off the analytics.
                     ['label' => 'Code & tracking', 'icon' => 'code', 'route' => 'admin.settings.code'],
                     ['label' => 'Downloads', 'icon' => 'download', 'route' => 'admin.settings.downloads'],
+                    // Settings and not Catalog: what is on that screen is a
+                    // provider, a model and two keys — preferences about how
+                    // a suggestion is produced. Accepting or rejecting what
+                    // it suggests happens in In review, which is the work.
+                    ['label' => 'Suggestions', 'icon' => 'wand-magic-sparkles', 'route' => 'admin.settings.suggestions'],
                 ],
             ],
 

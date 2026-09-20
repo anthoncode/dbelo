@@ -3,13 +3,19 @@
 use App\Models\Category;
 use App\Models\Collection as Pack;
 use App\Models\Sound;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 
 new #[Layout('layouts.admin')] class extends Component {
+    use WithFileUploads;
 
     public Pack $pack;
+
+    /** The cover being uploaded. Null except during an upload. */
+    public $cover = null;
 
     public string $search = '';
     public string $categoryId = '';
@@ -113,6 +119,64 @@ new #[Layout('layouts.admin')] class extends Component {
         $this->after();
     }
 
+    /* ═══════════════════════════ The cover ═══════════════════════════ */
+
+    /**
+     * Saved the moment a file is chosen.
+     *
+     * An `updated` hook rather than a Save button, because there is no other
+     * field on this screen to save alongside it: everything else here —
+     * adding a sound, reordering, publishing — already applies on click. One
+     * lonely Save button that governs one input is a button people forget to
+     * press, and then the upload silently did nothing.
+     *
+     * 2 MB and a real image mime. The dimensions are not enforced: the card
+     * crops with object-cover, so a wrong aspect ratio is a slightly odd
+     * crop rather than a broken layout, and rejecting an upload over it
+     * would be refusing work to prevent a cosmetic result.
+     */
+    public function updatedCover(): void
+    {
+        $this->validate([
+            'cover' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+        ], [], ['cover' => 'cover image']);
+
+        $disk = config('dbelo.storage.media', 'public');
+
+        $old = $this->pack->cover_path;
+
+        $path = $this->cover->store('packs', $disk);
+
+        $this->pack->update(['cover_path' => $path]);
+
+        // Delete the previous one AFTER the new one is stored and the row
+        // points at it. The other order means a failed upload leaves a pack
+        // whose image is gone and whose column still names it.
+        if (filled($old)) {
+            rescue(fn () => Storage::disk($disk)->delete($old), null, false);
+        }
+
+        $this->cover = null;
+        $this->pack->refresh();
+
+        session()->flash('ok', 'Cover updated.');
+    }
+
+    public function removeCover(): void
+    {
+        $path = $this->pack->cover_path;
+
+        $this->pack->update(['cover_path' => null]);
+
+        if (filled($path)) {
+            rescue(fn () => Storage::disk(config('dbelo.storage.media', 'public'))->delete($path), null, false);
+        }
+
+        $this->pack->refresh();
+
+        session()->flash('ok', 'Cover removed — the pack falls back to its icon.');
+    }
+
     public function togglePublic(): void
     {
         if (! $this->pack->is_public && $this->pack->sounds()->count() === 0) {
@@ -170,6 +234,70 @@ new #[Layout('layouts.admin')] class extends Component {
         </div>
     @endif
 
+    @if (session('ok'))
+        <div class="mb-5 flex items-center gap-3 rounded-xl border border-success/25 bg-success/[0.06] px-4 py-3">
+            <x-icon name="circle-check" style="solid" class="text-[0.8rem] text-success" />
+            <span class="text-[0.88rem] text-paper/80">{{ session('ok') }}</span>
+        </div>
+    @endif
+
+    {{-- ══════ COVER ══════
+         The preview is the real thing at the real aspect ratio, not a
+         thumbnail: the only question worth answering here is "does the crop
+         work", and a square 80px box cannot answer it. --}}
+    <div class="mb-5 rounded-2xl border border-hairline bg-panel p-5">
+        <div class="flex flex-wrap items-start gap-5">
+
+            <div class="relative aspect-[4/3] w-[220px] shrink-0 overflow-hidden rounded-xl bg-ink">
+                @if ($pack->hasCover())
+                    <img src="{{ $pack->coverUrl() }}" alt="" class="absolute inset-0 size-full object-cover" />
+                @else
+                    <div class="absolute inset-0"
+                         style="background:
+                             radial-gradient(120% 80% at 50% 0%, color-mix(in srgb, var(--color-brand) 38%, transparent), transparent 70%),
+                             linear-gradient(160deg, color-mix(in srgb, var(--color-brand) 16%, transparent), transparent 55%);"></div>
+                    <div class="absolute inset-0 grid place-items-center">
+                        <x-icon name="box-open" style="solid" class="text-[2rem] text-paper/80" />
+                    </div>
+                @endif
+
+                <div wire:loading wire:target="cover"
+                     class="absolute inset-0 grid place-items-center bg-ink/70 text-paper">
+                    <x-icon name="spinner-third" style="solid" class="animate-spin text-[1.2rem]" />
+                </div>
+            </div>
+
+            <div class="min-w-0 flex-1">
+                <h2 class="text-[0.95rem] font-medium">Cover</h2>
+                <p class="mt-1 max-w-[70ch] text-[0.82rem] leading-relaxed text-paper/45">
+                    Shown on the packs page. 4:3, at least 800&times;600, up to 2&nbsp;MB — it is cropped to fit,
+                    so keep anything important away from the edges. Without one the pack draws its icon on a
+                    brand gradient, which is a finished look rather than a placeholder: upload one when you
+                    have it, not before.
+                </p>
+
+                <div class="mt-4 flex flex-wrap items-center gap-3">
+                    <label class="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-raised px-4 py-2 text-[0.82rem] text-paper/80 transition hover:bg-rail">
+                        <x-icon name="arrow-up-from-bracket" style="solid" class="text-[0.75rem] text-info" />
+                        {{ $pack->hasCover() ? 'Replace' : 'Upload' }}
+                        <input type="file" wire:model="cover" accept="image/jpeg,image/png,image/webp" class="hidden" />
+                    </label>
+
+                    @if ($pack->hasCover())
+                        <button type="button" wire:click="removeCover"
+                                class="text-[0.8rem] text-paper/35 underline-offset-2 transition hover:text-danger hover:underline">
+                            Remove
+                        </button>
+                    @endif
+
+                    @error('cover')
+                        <span class="text-[0.8rem] text-danger">{{ $message }}</span>
+                    @enderror
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="grid gap-5 xl:grid-cols-[380px_1fr]">
 
         {{-- ══════ COLUMN 1 — PICKER ══════ --}}
@@ -196,7 +324,7 @@ new #[Layout('layouts.admin')] class extends Component {
 
             <div class="max-h-[520px] divide-y divide-hairline overflow-y-auto border-t border-hairline">
                 @forelse ($this->results as $sound)
-                    @php $inPack = in_array($sound->id, $this->memberIds, true); @endphp
+                    @php($inPack = in_array($sound->id, $this->memberIds, true))
 
                     <div wire:key="res-{{ $sound->id }}"
                          class="flex items-center gap-3 px-5 py-2.5 transition hover:bg-paper/[0.03]">

@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Database\Eloquent\Prunable;
 
 /**
  * A URL somebody asked for and did not get, with a count beside it.
@@ -18,6 +19,8 @@ use Illuminate\Support\Str;
  */
 class NotFound extends Model
 {
+    use Prunable;
+
     protected $table = 'not_founds';
 
     public $timestamps = false;
@@ -160,5 +163,39 @@ class NotFound extends Model
         return $best && $bestScore >= 65
             ? $best + ['score' => (int) round($bestScore)]
             : null;
+    }
+
+    /**
+     * What gets deleted, and what is kept however old it is.
+     *
+     * ── THE ONLY TABLE HERE THAT FILLS UP WITH SOMEBODY ELSE'S RUBBISH ───
+     *
+     * A 404 row is one per PATH, not one per visit, so honest traffic barely
+     * moves it. Bots are the problem: a scanner works through ten thousand
+     * WordPress paths that never existed on this site, and every one of them
+     * becomes a row that nobody will ever read or act on.
+     *
+     * That is exactly what the `noise` status already marks, so pruning it
+     * needs no new concept — just a deadline. A month is long enough to
+     * notice a pattern worth blocking and short enough that the table never
+     * becomes mostly rubbish.
+     *
+     * AN OPEN 404 IS NEVER PRUNED, at any age. Open means nobody has decided
+     * about it, and deleting an undecided broken URL is deciding on the
+     * operator's behalf that it did not matter — the same rule the error
+     * groups follow, for the same reason.
+     */
+    public function prunable(): Builder
+    {
+        return static::query()
+            ->where(function (Builder $q) {
+                $q->where('status', 'noise')
+                    ->where('last_seen_at', '<', now()->subDays(30));
+            })
+            ->orWhere(function (Builder $q) {
+                // Dealt with, and quiet for half a year.
+                $q->whereNotIn('status', ['open', 'noise'])
+                    ->where('last_seen_at', '<', now()->subDays(180));
+            });
     }
 }

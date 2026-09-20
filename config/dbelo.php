@@ -97,6 +97,22 @@ return [
         'footer' => 'A growing library of sound effects, catalogued and licensed so you can use them without reading the small print twice.',
 
         /*
+         * The line at the very bottom of every page.
+         *
+         * {year} and {site} are filled in when it is rendered — see
+         * App\Support\FooterLinks::copyright(). The tokens are the whole
+         * reason this is a template and not a sentence: a copyright typed
+         * out as "© 2026 dbelo" is correct for four months and then quietly
+         * wrong, and the person who typed it is the last person who will
+         * notice.
+         *
+         * Left empty in the admin panel, this default applies. Emptied HERE,
+         * the bar simply has no copyright — which is a legitimate choice,
+         * since copyright exists whether or not a page says so.
+         */
+        'copyright' => '© {year} {site} — sound effects library',
+
+        /*
          * Internal. Where a failed backup, a new error group or a blocked
          * address gets reported once alerts are switched on. Never rendered
          * on the site — the public address is legal.support_email.
@@ -113,6 +129,29 @@ return [
         'status' => 'live',
 
         'status_message' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Social profiles
+    |--------------------------------------------------------------------------
+    |
+    | Defaults for Admin → Settings → General → Social profiles. Empty: a
+    | fresh clone must not link to somebody else's Facebook.
+    |
+    | The real value is a JSON list stored in the settings table under
+    | `social.links` — one row per profile, {platform, label, url}. It is
+    | written and read only through App\Support\Social, which is where the
+    | catalogue of platforms and the URL rules live.
+    |
+    | Kept as a list rather than a field per network on purpose: the set of
+    | places worth having a profile changes faster than the schema. Bluesky
+    | did not exist, Vine did, and whatever replaces TikTok is not named yet.
+    |
+    */
+
+    'social' => [
+        'links' => [],
     ],
 
     /*
@@ -251,6 +290,29 @@ return [
     |
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Collections
+    |--------------------------------------------------------------------------
+    |
+    | A collection is a user's own list of sounds. Three states, all of them
+    | the owner's choice: private, unlisted (link only), listed (in the
+    | public directory at /collections).
+    |
+    | `indexable` is the one part of it that is NOT the owner's choice, and
+    | it is off by default. Letting search engines keep listed collections
+    | means letting them decide what this domain is about using forty pages
+    | named "Podcast", written by people whose names dbelo does not control.
+    | That is a decision about the whole site, so it is made here, once, by
+    | the operator — and only ever affects LISTED collections. Private and
+    | unlisted ones are noindex whatever this says.
+    |
+    */
+
+    'collections' => [
+        'indexable' => false,
+    ],
+
     'appearance' => [
         'logo_light' => null,
         'logo_dark' => null,
@@ -321,6 +383,70 @@ return [
              * they know whether the site is worth it.
              */
             'verify_email' => true,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Metadata suggestions
+    |--------------------------------------------------------------------------
+    |
+    | Defaults for Admin → Settings → Suggestions. The field list and the
+    | reading live in App\Support\Suggestions.
+    |
+    | ONLY THE NON-SECRET HALF IS HERE. Which provider answers and which model
+    | it uses are preferences: they get changed while the two are compared over
+    | real filenames, they end up in the activity log, and there is nothing to
+    | leak. The two API KEYS are not in this file and never will be — they are
+    | stored encrypted in the settings table, and a credential in a file that
+    | is committed to git is a credential you have published.
+    |
+    | The keys' .env fallback lives in config/services.php with the timeout,
+    | which is the only other thing about these providers that is not a
+    | preference. Nothing is defined in both files: two definitions of one
+    | value do not stay equal, they drift, and the drift is silent.
+    |
+    */
+
+    'ai' => [
+
+        /*
+         * 'gemini' or 'openai'. Anything else falls back to gemini.
+         *
+         * Gemini is the default because its free tier needs no card. That is
+         * the only difference that matters before the first key is typed in.
+         */
+        'provider' => env('AI_PROVIDER', 'gemini'),
+
+        /*
+         * AN EXACT MODEL ID, NEVER A "-latest" ALIAS.
+         *
+         * This said gemini-flash-lite-latest and has been pinned. Google
+         * hot-swaps what an alias points at, with a couple of weeks' notice
+         * — which means the tone and length of every description written
+         * after that day change without a deploy, a commit or a line in the
+         * log. Two thousand entries written by one model and the next two
+         * thousand by another is not a catalogue, and nothing on this end
+         * would say when the seam was.
+         *
+         * Aliases also get retired: gemini-flash-latest already started
+         * answering 404 for people who pinned nothing.
+         *
+         * Upgrading is a field on Admin → Settings → Suggestions, so this
+         * costs one minute and leaves an activity-log entry saying which
+         * model replaced which.
+         */
+        'gemini' => [
+            /*
+             * The cheapest tier is enough. The job is reading a filename, not
+             * reasoning — paying for a larger model here buys longer sentences
+             * about a sound nobody has listened to.
+             */
+            'model' => env('GEMINI_MODEL', 'gemini-3.5-flash-lite'),
+        ],
+
+        'openai' => [
+            'model' => env('OPENAI_MODEL', 'gpt-5-mini'),
         ],
     ],
 

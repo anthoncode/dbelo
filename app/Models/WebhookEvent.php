@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
+use Illuminate\Database\Eloquent\Prunable;
 
 /**
  * One webhook delivery from a payment gateway.
@@ -15,6 +16,8 @@ use Illuminate\Database\QueryException;
  */
 class WebhookEvent extends Model
 {
+    use Prunable;
+
     public const PENDING = 'pending';
 
     public const HANDLED = 'handled';
@@ -128,5 +131,28 @@ class WebhookEvent extends Model
     public function shortType(): string
     {
         return str_replace(['BILLING.SUBSCRIPTION.', 'PAYMENT.', 'CHECKOUT.ORDER.'], '', (string) $this->event_type);
+    }
+
+    /**
+     * Settled events, after ninety days.
+     *
+     * ── WHY NOT SOONER, AND WHY NOT THE OTHER TWO STATES ─────────────────
+     *
+     * This table's real job is the unique key that stops one webhook being
+     * processed twice. PayPal retries a delivery for up to three days, so
+     * anything younger than that is still actively guarding against a
+     * duplicate. Ninety days is that window with a very wide margin, and it
+     * keeps a quarter of billing history readable when a customer disputes
+     * a charge.
+     *
+     * PENDING and FAILED are never pruned. Those two mean "this arrived and
+     * was not dealt with" — the only rows on the table anybody would ever
+     * need to act on, and the ones a cleanup must never quietly remove.
+     */
+    public function prunable(): Builder
+    {
+        return static::query()
+            ->whereIn('status', [self::HANDLED, self::IGNORED, self::REJECTED])
+            ->where('created_at', '<', now()->subDays(90));
     }
 }

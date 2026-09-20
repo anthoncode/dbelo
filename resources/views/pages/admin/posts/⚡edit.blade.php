@@ -34,6 +34,16 @@ new #[Layout('layouts.admin')] #[Title('Editor')] class extends Component {
     public ?int $coverId = null;
     public int $sortOrder = 0;
 
+    /**
+     * Pages only: does this one belong in the footer?
+     *
+     * OFF for a new page, which is the change. Publishing a page used to put
+     * it in the footer of every page on the site with nothing to say
+     * otherwise — fine for About, wrong for a landing page written for one
+     * link in one email.
+     */
+    public bool $inFooter = false;
+
     /** Tag names, not ids: they are typed, and rows are made on save. */
     public array $tags = [];
     public string $tagInput = '';
@@ -74,6 +84,7 @@ new #[Layout('layouts.admin')] #[Title('Editor')] class extends Component {
             $this->categoryId = $post->post_category_id;
             $this->coverId = $post->cover_media_id;
             $this->sortOrder = $post->sort_order;
+            $this->inFooter = (bool) $post->in_footer;
             $this->metaTitle = (string) $post->meta_title;
             $this->metaDescription = (string) $post->meta_description;
             $this->noindex = $post->noindex;
@@ -102,6 +113,51 @@ new #[Layout('layouts.admin')] #[Title('Editor')] class extends Component {
     public function cover(): ?Media
     {
         return $this->coverId ? Media::find($this->coverId) : null;
+    }
+
+    /* ── The footer, for pages ─────────────────────────────────────────── */
+
+    /** More pages want the footer than the footer will draw. */
+    #[Computed]
+    public function footerCrowded(): bool
+    {
+        return Post::footerPagesWanted() > Post::FOOTER_MAX;
+    }
+
+    /**
+     * What the footer is actually doing with this page, in one sentence.
+     *
+     * Both numbers come from the SAVED state, never from the form — the
+     * footer draws what is in the database, and a note that counted an
+     * unticked box as ticked would be describing a page that does not exist
+     * yet. Which is also why an unsaved new page gets told to save first
+     * rather than given a figure that would change the moment it did.
+     */
+    #[Computed]
+    public function footerNote(): ?string
+    {
+        if ($this->type !== Post::TYPE_PAGE || ! $this->inFooter) {
+            return null;
+        }
+
+        if (! $this->postId) {
+            return 'Save it to see where it lands.';
+        }
+
+        $wanted = Post::footerPagesWanted();
+
+        if ($wanted <= Post::FOOTER_MAX) {
+            return $wanted <= 1
+                ? null
+                : "{$wanted} pages are in the footer. All of them fit.";
+        }
+
+        $max = Post::FOOTER_MAX;
+
+        return in_array($this->postId, Post::footerPageIds(), true)
+            ? "{$wanted} pages are ticked and the footer draws {$max}. This one is in."
+            : "{$wanted} pages are ticked and the footer draws {$max}. This one is NOT being shown — "
+                .'give it a lower number, or untick one of the others.';
     }
 
     /**
@@ -314,6 +370,11 @@ new #[Layout('layouts.admin')] #[Title('Editor')] class extends Component {
             'noindex' => $this->noindex,
             'reading_minutes' => Post::readingMinutes($this->body),
             'sort_order' => $this->sortOrder,
+            // Forced false on a blog post rather than passed through. The
+            // checkbox is only drawn for a page, so a post could only ever
+            // carry a true here by accident — and an accident that writes a
+            // column nothing reads is one somebody debugs twice.
+            'in_footer' => $this->type === Post::TYPE_PAGE && $this->inFooter,
         ])->save();
 
         $post->tags()->sync(
@@ -326,7 +387,10 @@ new #[Layout('layouts.admin')] #[Title('Editor')] class extends Component {
         $this->postId = $post->id;
         $this->savedAt = now()->format('H:i');
 
-        unset($this->post);
+        // The two footer notes are computed from the database and memoised
+        // for the request. The save that just happened is exactly what they
+        // are describing, so they have to be dropped along with $this->post.
+        unset($this->post, $this->footerNote, $this->footerCrowded);
 
         if ($isNew && $redirect) {
             $this->redirectRoute(
@@ -696,12 +760,53 @@ new #[Layout('layouts.admin')] #[Title('Editor')] class extends Component {
                         A date in the future schedules it. It goes live on its own — there is no job to keep running.
                     </p>
 
+                    {{-- ── THE FOOTER, FOR PAGES ────────────────────────
+                         The order box used to be here on its own, which made
+                         it look like the decision — it was not. Every
+                         published page went into the footer and this only
+                         said where. The checkbox is the decision; the number
+                         only matters once it is ticked, which is why it is
+                         not drawn until then. --}}
                     @if ($type === 'page')
-                        <label class="mt-4 block">
-                            <span class="mb-2 block text-[0.72rem] uppercase tracking-[0.14em] text-paper/35">Order in the footer</span>
-                            <input type="number" wire:model="sortOrder" min="0" max="99"
-                                   class="w-full rounded-lg border-0 bg-raised px-3.5 py-2.5 text-[0.85rem] text-paper focus:outline-none focus:ring-2 focus:ring-brand/40" />
-                        </label>
+                        <div class="mt-4 border-t border-hairline pt-4">
+                            <label class="flex cursor-pointer items-start gap-3">
+                                <input type="checkbox" wire:model.live="inFooter"
+                                       class="mt-0.5 size-4 shrink-0 rounded border-0 bg-raised text-brand focus:ring-2 focus:ring-brand/40" />
+                                <span>
+                                    <span class="block text-[0.85rem]">Show in the footer</span>
+                                    <span class="mt-1 block text-[0.73rem] leading-relaxed text-paper/30">
+                                        Under <span class="text-paper/50">Resources</span>, on every page of the site.
+                                        Off unless you say so — a page written for one link in one email does not
+                                        belong down there.
+                                    </span>
+                                </span>
+                            </label>
+
+                            @if ($inFooter)
+                                <label class="mt-4 block">
+                                    <span class="mb-2 block text-[0.72rem] uppercase tracking-[0.14em] text-paper/35">Order in the footer</span>
+                                    <input type="number" wire:model.live="sortOrder" min="0" max="99"
+                                           class="w-full rounded-lg border-0 bg-raised px-3.5 py-2.5 text-[0.85rem] text-paper focus:outline-none focus:ring-2 focus:ring-brand/40" />
+                                    <span class="mt-2 block text-[0.73rem] leading-relaxed text-paper/30">
+                                        Lowest number first. The column holds {{ \App\Models\Post::FOOTER_MAX }} pages at most —
+                                        anything past that is still live and still in the sitemap, just not in the footer.
+                                    </span>
+                                </label>
+
+                                {{-- Says so out loud when the box is ticked
+                                     and the page is not actually being
+                                     drawn. A ticked checkbox that does
+                                     nothing is the exact failure this whole
+                                     change was meant to remove. --}}
+                                @if ($this->footerNote)
+                                    <p @class([
+                                        'mt-3 rounded-lg px-3 py-2.5 text-[0.75rem] leading-relaxed',
+                                        'bg-warning/[0.08] text-warning' => $this->footerCrowded,
+                                        'bg-paper/[0.04] text-paper/40' => ! $this->footerCrowded,
+                                    ])>{{ $this->footerNote }}</p>
+                                @endif
+                            @endif
+                        </div>
                     @endif
                 </div>
             </div>

@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Prunable;
 
 /**
  * One day's tally for one error group.
@@ -16,6 +18,8 @@ use Illuminate\Support\Facades\DB;
  */
 class ErrorDaily extends Model
 {
+    use Prunable;
+
     protected $table = 'error_daily';
 
     public $timestamps = false;
@@ -55,5 +59,19 @@ class ErrorDaily extends Model
             ->where('error_group_id', $groupId)
             ->where('date', $date)
             ->increment('count', $delta);
+    }
+
+    /**
+     * Six months of daily counts, matching the groups above them.
+     *
+     * The cascade on error_group_id already clears these when a whole group
+     * is pruned — but a group that is still OPEN is never pruned, and it
+     * keeps writing one row a day for as long as the error keeps happening.
+     * An error nobody has fixed in three years is three years of daily rows
+     * behind a count that only ever needed the recent shape.
+     */
+    public function prunable(): Builder
+    {
+        return static::query()->where('date', '<', now()->subDays(180)->toDateString());
     }
 }

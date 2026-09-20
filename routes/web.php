@@ -111,6 +111,21 @@ Route::livewire('library', 'pages::library')
     ->middleware('auth')
     ->name('library');
 
+/*
+| Collections.
+|
+| The directory first, then the single collection, and the order is not a
+| style choice: a route with a static segment has to be registered before the
+| one with the placeholder, or "collections" is matched as a slug and the
+| index becomes a 404 for a collection nobody ever created.
+|
+| The directory shows only collections whose owner chose "Listed". Sharing a
+| link is a different decision and does not put anything here — see
+| Collection::scopeListed.
+*/
+Route::livewire('collections', 'pages::collections')
+    ->name('collections.index');
+
 Route::livewire('collections/{collection}', 'pages::collections.show')
     ->name('collections.show');
 
@@ -306,6 +321,10 @@ Route::livewire('admin/settings/code', 'pages::admin.settings.code')
 Route::livewire('admin/settings/downloads', 'pages::admin.settings.downloads')
     ->middleware('auth')
     ->name('admin.settings.downloads');
+
+Route::livewire('admin/settings/suggestions', 'pages::admin.settings.suggestions')
+    ->middleware('auth')
+    ->name('admin.settings.suggestions');
 
 /*
 | Records for the ⌘K palette.

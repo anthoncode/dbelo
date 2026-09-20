@@ -44,6 +44,9 @@ class Sound extends Model
             'is_premium' => 'boolean',
             'is_featured' => 'boolean',
             'published_at' => 'datetime',
+            'ai_suggestions' => 'array',
+            'search_terms' => 'array',
+            'ai_suggested_at' => 'datetime',
             'reviewed_at' => 'datetime',
             'processed_at' => 'datetime',
         ];
@@ -264,6 +267,22 @@ class Sound extends Model
 
             'license_slug' => $this->license?->slug,
             'tags' => $this->tags->pluck('name')->all(),
+
+            /*
+             * Words that MATCH but are never rendered — mostly the Spanish
+             * ones, so "truenos" finds a sound tagged "thunder".
+             *
+             * They are sent to the engine and nowhere else. Nothing on the
+             * site reads this field, which is deliberate: it is allowed to
+             * hold misspellings and regionalisms precisely because no visitor
+             * will ever be shown them.
+             *
+             * Meilisearch only searches what config/scout.php lists under
+             * searchableAttributes, so adding it here is half the change —
+             * the other half is that list, and `scout:sync-index-settings`
+             * after it.
+             */
+            'search_terms' => $this->search_terms ?? [],
 
             'type' => $this->type,
             'duration_ms' => (int) $this->duration_ms,

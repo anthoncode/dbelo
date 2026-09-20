@@ -99,4 +99,58 @@ return [
         'connect_timeout' => (int) env('PAYPAL_CONNECT_TIMEOUT', 10),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Metadata suggestions
+    |--------------------------------------------------------------------------
+    |
+    | Two drivers, one switch. Both are written and both stay written, because
+    | the only honest way to choose between them for THIS catalogue is to run
+    | each over the same twenty real filenames and read the tags side by side.
+    | A provider that has to be implemented before it can be compared never
+    | gets compared.
+    |
+    | WHAT IS HERE AND WHAT IS NOT. This file holds the two keys' .env
+    | fallback and the timeout, and nothing else. Which provider answers and
+    | which model it uses are preferences, they live in config/dbelo.php, and
+    | they are edited from Admin → Settings → Suggestions. Nothing is defined
+    | in both files on purpose: two definitions of one value drift, and the
+    | drift is silent.
+    |
+    | UNLIKE PAYPAL, the keys can ALSO be stored — encrypted — in the settings
+    | table, and a stored one wins over what is here. That looks like an
+    | inconsistency and is a deliberate one: a leaked model key spends a quota
+    | and is revoked from a console in seconds, where a leaked payment secret
+    | is somebody taking money in dbelo's name. App\Support\Suggestions has the
+    | full argument.
+    |
+    | A NOTE ON THE FREE TIERS, because they are not the same offer:
+    |
+    |   gemini  free without a card. Google may use what is sent to improve
+    |           their products.
+    |   openai  no signup credits any more. Free daily tokens exist through an
+    |           opt-in data-sharing programme — prompts and answers used for
+    |           training — and a card is still required on the account.
+    |
+    | Everything dbelo sends is a filename and a duration for a sound that
+    | will be public anyway. Nothing private goes through either.
+    |
+    */
+
+    'ai' => [
+
+        'gemini' => [
+            'key' => env('GEMINI_API_KEY'),
+        ],
+
+        'openai' => [
+            'key' => env('OPENAI_API_KEY'),
+        ],
+
+        // Seconds. Generous, because this runs in a queue where nobody is
+        // waiting — but not unbounded, because a hung request holds a worker
+        // that has forty-nine other sounds to get through.
+        'timeout' => (int) env('AI_TIMEOUT', 45),
+    ],
+
 ];

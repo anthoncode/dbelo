@@ -53,6 +53,16 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
      */
     public string $editTags = '';
 
+    /**
+     * The description, editable in the row.
+     *
+     * It was reachable only from the sound's own page, which meant checking
+     * what a hundred sounds say involved a hundred navigations. The whole
+     * point of an inline editor is that the catalogue can be corrected from
+     * the list it is being read in.
+     */
+    public string $editDescription = '';
+
     /** Applied by the bulk bar when rows are ticked. */
     public string $bulkCategory = '';
 
@@ -302,12 +312,13 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
         $this->editTitle = $sound->title;
         $this->editCategory = (string) $sound->category_id;
         $this->editTags = $sound->tags->pluck('name')->join(', ');
+        $this->editDescription = (string) $sound->description;
         $this->resetErrorBag();
     }
 
     public function cancel(): void
     {
-        $this->reset(['editing', 'editTitle', 'editCategory', 'editTags']);
+        $this->reset(['editing', 'editTitle', 'editCategory', 'editTags', 'editDescription']);
         $this->resetErrorBag();
     }
 
@@ -316,6 +327,10 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
         $this->validate([
             'editTitle' => ['required', 'string', 'min:2', 'max:120'],
             'editTags' => ['nullable', 'string', 'max:255'],
+            // 2000 matches the sound's own edit page. Two limits on one
+            // column means one screen accepts what the other rejects, and
+            // the person who hits it has no way to know which is the rule.
+            'editDescription' => ['nullable', 'string', 'max:2000'],
         ]);
 
         $sound = Sound::findOrFail($this->editing);
@@ -326,6 +341,7 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
         $sound->update([
             'title' => trim($this->editTitle),
             'category_id' => $this->editCategory ?: null,
+            'description' => trim($this->editDescription) ?: null,
         ]);
 
         /*
@@ -686,6 +702,18 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
                                         </div>
                                         @error('editTags') <p class="text-[0.8rem] text-danger">{{ $message }}</p> @enderror
 
+                                        {{-- Description.
+
+                                             No Enter-to-save here, unlike the two fields
+                                             above: this is prose and a line break in it is
+                                             a paragraph, not a submit. A textarea whose
+                                             Enter key saves the form is a textarea you
+                                             cannot write two sentences in. --}}
+                                        <textarea wire:model="editDescription" rows="3" maxlength="2000"
+                                                  placeholder="What the sound is, and what someone would use it for."
+                                                  class="w-full rounded-lg border-0 bg-panel px-3.5 py-2.5 text-[0.85rem] leading-relaxed text-paper placeholder:text-paper/25 focus:outline-none focus:ring-2 focus:ring-brand/40"></textarea>
+                                        @error('editDescription') <p class="text-[0.8rem] text-danger">{{ $message }}</p> @enderror
+
                                         <div class="flex flex-wrap items-center gap-2">
                                             <select wire:model="editCategory"
                                                     class="rounded-lg border-0 bg-panel px-3 py-2.5 text-[0.85rem] text-paper focus:outline-none focus:ring-2 focus:ring-brand/40">
@@ -715,11 +743,15 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
                                 </td>
                             </tr>
                         @else
-                            @php
-                                $peaks = $this->peaks($sound);
-                                $url = $this->previewUrl($sound);
-                                $live = $sound->status === 'published';
-                            @endphp
+                            {{-- One-line form only. This file must never
+                                 carry a block @ php … @ endphp as well: Blade
+                                 lifts raw PHP blocks before compiling and
+                                 pairs the FIRST opener with the first closer,
+                                 swallowing everything in between. It took the
+                                 sound page down once already. --}}
+                            @php($peaks = $this->peaks($sound))
+                            @php($url = $this->previewUrl($sound))
+                            @php($live = $sound->status === 'published')
 
                             <tr wire:key="snd-{{ $sound->id }}" class="group/row transition hover:bg-paper/[0.03]">
                                 <td class="px-5 py-3">
@@ -809,6 +841,31 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
                                             </span>
                                         @endif
                                     </div>
+
+                                    {{-- ── THE DESCRIPTION, ON ONE LINE ───────────────
+                                         truncate, not line-clamp-2: every row has to be
+                                         the same height or the table stops being scannable,
+                                         and a column that grows with the longest text is a
+                                         column that decides the layout for all the others.
+
+                                         The full text is in the title attribute, so hovering
+                                         reads it without opening anything, and the editor is
+                                         one click away for changing it.
+
+                                         When there is none, the row SAYS so. An empty cell
+                                         and a cell nobody filled in look identical, and the
+                                         whole reason for putting this column here is finding
+                                         the ones that are missing. --}}
+                                    @if (filled($sound->description))
+                                        <div class="mt-1 truncate text-[0.75rem] text-paper/40"
+                                             title="{{ $sound->description }}">{{ $sound->description }}</div>
+                                    @else
+                                        <button wire:click="edit({{ $sound->id }})"
+                                                class="mt-1 flex items-center gap-1.5 text-[0.72rem] text-paper/20 transition hover:text-warning">
+                                            <x-icon name="align-left" style="solid" class="text-[9px]" />
+                                            No description
+                                        </button>
+                                    @endif
 
                                     <div class="mt-1 truncate text-[0.7rem] text-paper/25">
                                         {{ $sound->user?->name ?? 'No uploader' }} · {{ $sound->created_at?->diffForHumans() }}

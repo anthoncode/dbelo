@@ -12,14 +12,39 @@
     $seo = array_merge([
         'title' => null,
         'description' => config('dbelo.site.description'),
-        'canonical' => url()->current(),
+        // NOT url()->current(): that drops ?page, and a canonical that
+        // says page two is page one is a canonical that deletes page two.
+        // See App\Support\Canonical for which parameters survive.
+        'canonical' => \App\Support\Canonical::current(),
         // The uploaded share image wins; og-default.png is the fallback
-        // and — checked on 2 Sep 2026 — is not actually in public/, so
-        // until one is uploaded every shared link has a broken preview.
+        // and now really is in public/ — it was generated on 13 Sep 2026,
+        // 1200x630 with the wordmark, so a link shared before anybody has
+        // uploaded anything still paints a card.
         'image' => \App\Support\Appearance::url('social_image') ?? asset('og-default.png'),
         'type' => 'website',
         'jsonld' => null,
         'noindex' => false,
+
+        // What the share image shows, and how big it is. Both matter and for
+        // different reasons: WhatsApp and LinkedIn will not paint a preview
+        // until they know the dimensions, so without these the card appears
+        // a second late or not at all — and alt text is the only thing a
+        // screen reader has to go on when a link is read aloud.
+        'image_alt' => 'dbelo — sound effects library',
+        'image_width' => 1200,
+        'image_height' => 630,
+
+        // The preview MP3, when the page is about one sound. Lets a platform
+        // that supports it play without leaving the feed.
+        'audio' => null,
+
+        // Only read when type is 'article'. Kept in the defaults anyway so
+        // every page has the key and nothing here has to test for its
+        // existence before its value.
+        'published_time' => null,
+        'modified_time' => null,
+        'author' => null,
+        'section' => null,
 
     // Nulls are stripped before merging. array_merge lets a shared key
     // override even when its value is null, so a page that shares
@@ -47,8 +72,28 @@
      ranking between them. --}}
 <link rel="canonical" href="{{ $seo['canonical'] }}">
 
+{{-- ── THE FEED NOBODY COULD FIND ──────────────────────────────────────
+     /blog/feed has worked since the blog was built and nothing on any
+     page pointed at it, so the only way to reach it was to already know
+     the address. This line is what a reader, a browser or an aggregator
+     looks for. Drawn only once there is something published: advertising
+     an empty feed is a promise the site does not keep. --}}
+@if (\App\Models\Post::blogHasPosts())
+    <link rel="alternate" type="application/rss+xml"
+          title="{{ config('app.name', 'dbelo') }} — blog"
+          href="{{ route('blog.feed') }}">
+@endif
+
 @if ($seo['noindex'])
     <meta name="robots" content="noindex, follow">
+@else
+    {{-- max-image-preview:large is what lets Google put a full-width image
+         beside the result instead of a thumbnail or nothing. It is opt-in:
+         the default without this line is the small one. The other two lift
+         the caps on snippet length and video preview, which cost nothing
+         here and are the difference between a two-line snippet and a
+         four-line one. --}}
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
 @endif
 
 <meta property="og:site_name" content="{{ config('app.name', 'dbelo') }}">
@@ -57,11 +102,44 @@
 <meta property="og:description" content="{{ $seo['description'] }}">
 <meta property="og:url" content="{{ $seo['canonical'] }}">
 <meta property="og:image" content="{{ $seo['image'] }}">
+<meta property="og:image:width" content="{{ $seo['image_width'] }}">
+<meta property="og:image:height" content="{{ $seo['image_height'] }}">
+<meta property="og:image:alt" content="{{ $seo['image_alt'] }}">
+<meta property="og:locale" content="en_US">
+
+@if ($seo['audio'])
+    <meta property="og:audio" content="{{ $seo['audio'] }}">
+    <meta property="og:audio:type" content="audio/mpeg">
+@endif
+
+{{-- ── WHAT og:type="article" IMPLIES AND NOBODY WAS SENDING ──────────
+     Declaring the type without the fields that belong to it is half a
+     declaration: the platforms that show a date, an author or a section
+     beside a shared link look for exactly these, find nothing, and draw
+     the same bare card as for any other page. They cost four lines. --}}
+@if ($seo['type'] === 'article')
+    @if ($seo['published_time'])
+        <meta property="article:published_time" content="{{ $seo['published_time'] }}">
+    @endif
+
+    @if ($seo['modified_time'])
+        <meta property="article:modified_time" content="{{ $seo['modified_time'] }}">
+    @endif
+
+    @if ($seo['author'])
+        <meta property="article:author" content="{{ $seo['author'] }}">
+    @endif
+
+    @if ($seo['section'])
+        <meta property="article:section" content="{{ $seo['section'] }}">
+    @endif
+@endif
 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{{ $fullTitle }}">
 <meta name="twitter:description" content="{{ $seo['description'] }}">
 <meta name="twitter:image" content="{{ $seo['image'] }}">
+<meta name="twitter:image:alt" content="{{ $seo['image_alt'] }}">
 
 {{-- Structured data. For a sound page this is what makes Google show a
      player right in the results instead of a plain blue link. --}}

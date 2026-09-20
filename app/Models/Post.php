@@ -38,6 +38,7 @@ class Post extends Model
             'published_at' => 'datetime',
             'autosaved_at' => 'datetime',
             'noindex' => 'boolean',
+            'in_footer' => 'boolean',
         ];
     }
 
@@ -47,7 +48,7 @@ class Post extends Model
         // the two lists that show pages and posts on every page view.
         $flush = function (Post $post) {
             Cache::forget("post.{$post->id}.html");
-            Cache::forget('footer.pages');
+            Cache::forget(self::FOOTER_CACHE);
             Cache::forget('blog.has_posts');
             Cache::forget('blog.feed');
             Cache::forget('sitemap.xml');
@@ -262,20 +263,82 @@ class Post extends Model
     // site.
 
     /**
+     * How many pages the footer will draw.
+     *
+     * ── WHY THERE IS A CEILING AT ALL ────────────────────────────────────
+     *
+     * The column is a column. Six links under a heading is a list somebody
+     * reads; fourteen is a wall, and the fourteenth link gets less attention
+     * than it would have got from not being there — it makes the other
+     * thirteen harder to see as well.
+     *
+     * It is not a limit on how many pages the site can have. A page that
+     * does not fit here is still live, still in the sitemap, still linked
+     * from wherever it was written to be linked from. The footer is a
+     * shortcut, not a table of contents.
+     */
+    public const FOOTER_MAX = 6;
+
+    /**
+     * Bumped from `footer.pages` when in_footer arrived.
+     *
+     * The cached payload changed shape and meaning on the same day: it gained
+     * an id, and it stopped meaning "every published page". A key that stays
+     * the same across that would serve the OLD list — unfiltered, without
+     * ids — for up to an hour after the migration, which is exactly the hour
+     * somebody would spend wondering why the checkbox does nothing.
+     */
+    private const FOOTER_CACHE = 'footer.pages.v2';
+
+    /**
      * The pages listed in the footer, as plain arrays — what goes into the
      * cache is exactly what comes out.
      *
-     * @return array<int, array{slug: string, title: string}>
+     * The id is in there for the admin screens, which mark the rows that
+     * actually made it in. One query decides it, and both the footer and the
+     * panel read that one answer — otherwise the panel would be guessing at
+     * the footer's rule, and would eventually guess wrong.
+     *
+     * @return array<int, array{id: int, slug: string, title: string}>
      */
     public static function footerPages(): array
     {
-        return Cache::remember('footer.pages', now()->addHour(), fn () => static::pages()
+        return Cache::remember(self::FOOTER_CACHE, now()->addHour(), fn () => static::pages()
             ->live()
+            ->where('in_footer', true)
             ->orderBy('sort_order')
             ->orderBy('title')
-            ->get(['slug', 'title'])
-            ->map(fn (self $page) => ['slug' => $page->slug, 'title' => $page->title])
+            ->limit(self::FOOTER_MAX)
+            ->get(['id', 'slug', 'title'])
+            ->map(fn (self $page) => ['id' => $page->id, 'slug' => $page->slug, 'title' => $page->title])
             ->all());
+    }
+
+    /**
+     * How many live pages are ASKING to be in the footer.
+     *
+     * Not the same number as count(footerPages()) once there are more than
+     * six, and the difference is the whole point: the admin screens use the
+     * gap to say "two of these are not being shown" instead of letting a
+     * ticked checkbox quietly do nothing.
+     *
+     * Uncached on purpose — it is read on two admin screens, never on a
+     * public page, and a stale answer here would be a lie told to the one
+     * person who can act on it.
+     */
+    public static function footerPagesWanted(): int
+    {
+        return static::pages()->live()->where('in_footer', true)->count();
+    }
+
+    /**
+     * Ids of the pages the footer is actually drawing.
+     *
+     * @return array<int, int>
+     */
+    public static function footerPageIds(): array
+    {
+        return array_column(static::footerPages(), 'id');
     }
 
     /** Whether the Blog link belongs in the nav at all. */

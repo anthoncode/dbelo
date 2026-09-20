@@ -23,13 +23,29 @@ new #[Layout('layouts.site')] #[Title('Blog')] class extends Component {
         $this->category = $category ?? '';
         $this->tag = $tag ?? '';
 
-        $heading = $this->heading();
+        /*
+         * ── A SLUG THAT DOES NOT EXIST IS A 404, NOT AN EMPTY PAGE ───────
+         *
+         * This used to accept anything. /blog/category/anything-at-all
+         * answered 200 with the word "Blog" and no posts — which is a soft
+         * 404: a page that says "here is nothing" while the server insists
+         * it found something. Google treats those as a quality signal about
+         * the whole site, and a person who mistyped gets no clue that they
+         * mistyped.
+         *
+         * A category or tag that EXISTS but has no live posts is a different
+         * thing and still answers 200. It is empty today; it was not a
+         * mistake.
+         */
+        abort_if($this->category !== '' && ! $this->current, 404);
+        abort_if($this->tag !== '' && ! $this->currentTag, 404);
 
         view()->share('seo', [
-            'title' => $heading,
+            'title' => $this->heading(),
             'description' => $this->current?->description
                 ?: 'Guides, techniques and news about sound design, field recording and working with audio.',
-            'canonical' => url()->current(),
+            // Keeps ?page, drops the tracking junk — see App\Support\Canonical.
+            'canonical' => \App\Support\Canonical::current(),
             // A filtered listing is the same content sliced differently.
             // Letting Google index every slice splits the ranking.
             'noindex' => (bool) ($this->category || $this->tag),
@@ -42,14 +58,27 @@ new #[Layout('layouts.site')] #[Title('Blog')] class extends Component {
         return $this->category ? PostCategory::where('slug', $this->category)->first() : null;
     }
 
+    /**
+     * The tag being filtered on, as a row rather than as a slug.
+     *
+     * It was never looked up, and the heading printed the slug: a tag named
+     * "Field recording" became "#field-recording" in the H1 AND in the
+     * title element, which is the version Google would have indexed.
+     */
+    #[Computed]
+    public function currentTag(): ?PostTag
+    {
+        return $this->tag ? PostTag::where('slug', $this->tag)->first() : null;
+    }
+
     protected function heading(): string
     {
         if ($this->current) {
             return $this->current->name;
         }
 
-        if ($this->tag) {
-            return '#'.$this->tag;
+        if ($this->currentTag) {
+            return '#'.$this->currentTag->name;
         }
 
         return 'Blog';
@@ -93,8 +122,8 @@ new #[Layout('layouts.site')] #[Title('Blog')] class extends Component {
             <h1 class="mt-2 text-4xl font-semibold tracking-[-0.03em]">
                 @if ($this->current)
                     {{ $this->current->name }}
-                @elseif ($tag)
-                    <span class="text-brand">#</span>{{ $tag }}
+                @elseif ($this->currentTag)
+                    <span class="text-brand">#</span>{{ $this->currentTag->name }}
                 @else
                     Notes on sound
                 @endif

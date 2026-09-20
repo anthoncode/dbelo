@@ -109,9 +109,64 @@ new #[Layout('layouts.site')] class extends Component {
             'canonical' => $post->url(),
             'image' => $post->cover?->url() ?? asset('og-default.png'),
             'type' => 'article',
+
+            // og:type was already 'article' and none of what that implies was
+            // being sent, so every shared link drew the same bare card as a
+            // contact page. See the article: block in partials/head.
+            'published_time' => $post->published_at?->toAtomString(),
+            'modified_time' => $post->updated_at?->toAtomString(),
+            'author' => $post->author?->name,
+            'section' => $post->category?->name,
+
             'noindex' => $post->noindex || $this->isDraft,
-            'jsonld' => $jsonld,
+
+            // Two graphs in one script tag, which is valid and is what the
+            // sound page already does. The breadcrumb is second because the
+            // article is what the page is about.
+            'jsonld' => [$jsonld, $this->breadcrumb()],
         ]);
+    }
+
+    /**
+     * The trail Google draws instead of the bare URL in a result.
+     *
+     * ── IT MATCHES THE ONE ON SCREEN, WHICH IS THE POINT ─────────────────
+     *
+     * The page already prints Blog / Category above the headline. Structured
+     * data that described a different path would be describing a page that
+     * does not exist — and the markup is only worth anything because a
+     * person can check it against what they can see.
+     *
+     * The post itself is the last item and carries no URL, per Google's
+     * examples: the final crumb is where you already are.
+     *
+     * @return array<string, mixed>
+     */
+    protected function breadcrumb(): array
+    {
+        $items = [
+            ['name' => 'Blog', 'item' => route('blog')],
+        ];
+
+        if ($this->post->category) {
+            $items[] = [
+                'name' => $this->post->category->name,
+                'item' => route('blog.category', $this->post->category->slug),
+            ];
+        }
+
+        $items[] = ['name' => $this->post->title];
+
+        return [
+            '@context' => 'https://schema.org',
+            '@type' => 'BreadcrumbList',
+            'itemListElement' => collect($items)->values()->map(fn ($item, $i) => array_filter([
+                '@type' => 'ListItem',
+                'position' => $i + 1,
+                'name' => $item['name'],
+                'item' => $item['item'] ?? null,
+            ]))->all(),
+        ];
     }
 
     /** Same category first, then anything recent. Never the post itself. */

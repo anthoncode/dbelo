@@ -42,7 +42,16 @@ class CollectionPicker extends Component
 
     /* ═══════════════════════════ Reading ═══════════════════════════ */
 
-    /** Every collection this person owns, unfiltered. */
+    /**
+     * Every collection this person owns, unfiltered.
+     *
+     * notPack() because a pack is built by an admin through this same
+     * relation — auth()->user()->collections()->create(['is_featured' =>
+     * true]) — so without it an admin opening this dropdown on any sound
+     * sees the site's official packs sitting among their own lists, and
+     * ticking one edits the catalogue. Packs are curated from the admin
+     * screen, on purpose and with a preview.
+     */
     #[Computed]
     public function allCollections()
     {
@@ -51,6 +60,7 @@ class CollectionPicker extends Component
         }
 
         return auth()->user()->collections()
+            ->notPack()
             ->withCount('sounds')
             ->latest('updated_at')
             ->get();
@@ -99,6 +109,7 @@ class CollectionPicker extends Component
         }
 
         return $this->sound->collections()
+            ->notPack()
             ->where('user_id', auth()->id())
             ->pluck('collections.id')
             ->all();
@@ -155,7 +166,9 @@ class CollectionPicker extends Component
 
     public function toggleCollection(int $collectionId): void
     {
-        $collection = Collection::where('user_id', auth()->id())->findOrFail($collectionId);
+        // notPack() so a posted id belonging to an official pack is a 404
+        // rather than an edit to the catalogue.
+        $collection = Collection::notPack()->where('user_id', auth()->id())->findOrFail($collectionId);
 
         if (in_array($collectionId, $this->memberOf, true)) {
             $collection->sounds()->detach($this->sound->id);
@@ -169,7 +182,25 @@ class CollectionPicker extends Component
         unset($this->memberOf, $this->collections, $this->allCollections);
     }
 
-    public function create(): void
+    /**
+     * Make a new collection with this sound already in it.
+     *
+     * ── WHY IT IS NOT CALLED create() ────────────────────────────────────
+     *
+     * It was, and Livewire answered every call with "Public method [create]
+     * not found on component". Renaming it only changed the name in the
+     * message, which was the first real clue: the method was never the
+     * problem. The stack trace named the component the call actually
+     * reached — Livewire\Component@anonymous, which is the sound PAGE, not
+     * this class — and the cause turned out to be the view's root element,
+     * not anything in here. The note at the top of the view has it.
+     *
+     * The name stays anyway, for the reason that already applied before the
+     * cause was known and still applies now: a bare, generic verb is a name
+     * a framework might one day want, this one costs nothing to give up,
+     * and it reads better next to toggleCollection.
+     */
+    public function createCollection(): void
     {
         $this->validate([
             'newName' => ['required', 'string', 'max:80'],

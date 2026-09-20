@@ -1,20 +1,44 @@
 User-agent: *
 Allow: /
 
-# Private areas: nothing to index and nothing a crawler should touch.
-Disallow: /upload
-Disallow: /moderate
-Disallow: /users
-Disallow: /settings
-Disallow: /dashboard
-Disallow: /login
-Disallow: /register
+# ── WHY ALMOST NOTHING IS DISALLOWED HERE ────────────────────────────────
+#
+# This file used to block the filtered catalogue: /*?q=, /*?duration= and
+# three more. It was undoing the thing it was trying to do.
+#
+# Those pages already send <meta name="robots" content="noindex">. Google's
+# own documentation is blunt about what happens next: "For the noindex rule
+# to be effective, the page must not be blocked by a robots.txt file... the
+# crawler will never see the noindex rule, and the page can still appear in
+# search results." Blocking the crawl is not asking for no index — it is
+# preventing the request from being read, and the URL can still show up as a
+# bare link with no title and no description, which is worse than showing up
+# properly.
+#
+# The patterns did not even work. "/*?q=" only matches when q is the FIRST
+# parameter, because the ? is literal — /sounds?category=doors&q=rain walked
+# straight past it.
+#
+# The private areas were listed too: /users, /moderate, /settings, /upload.
+# All four already answer 403 to anybody who should not be there, and that
+# is the protection. Naming them here added nothing except a public index of
+# where the private parts are — this file is world-readable, and the people
+# it would warn off are not the ones reading it.
+#
+# Disallow does have a real use: crawl budget, when a catalogue is huge and
+# the filter combinations are effectively infinite. That day may come. It
+# will not be solved by blocking the same URLs that carry a noindex.
 
-# Filtered catalogue variants are thin duplicates of /sounds.
-Disallow: /*?q=
-Disallow: /*?duration=
-Disallow: /*?sort=
-Disallow: /*?freeOnly=
-Disallow: /*?loopsOnly=
+# ── THE ONE THING THAT GENUINELY MUST NOT BE CRAWLED ─────────────────────
+#
+# A download is an ACTION, not a page. It is a plain <a href> on every sound
+# in the catalogue, it does not require an account, and it counts against a
+# quota. A crawler walking the library would spend somebody's free downloads
+# and skew every figure on the analytics screen — and there is no noindex to
+# read, because the response is a file, not a document.
+#
+# This is the case robots.txt is for: not "do not list it", but "do not
+# fetch it".
+Disallow: /sounds/*/download
 
 Sitemap: https://dbelo.com/sitemap.xml

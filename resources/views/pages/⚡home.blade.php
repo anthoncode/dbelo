@@ -48,20 +48,49 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
             'title' => null,   // the landing uses the bare site title
             'description' => 'Thousands of studio-grade sound effects, cleared for commercial use. Listen to everything free, download with an account.',
             'canonical' => route('home'),
-            'jsonld' => [
-                '@context' => 'https://schema.org',
-                '@type' => 'WebSite',
-                'name' => config('app.name', 'dbelo'),
-                'url' => route('home'),
-                'potentialAction' => [
-                    '@type' => 'SearchAction',
-                    'target' => [
-                        '@type' => 'EntryPoint',
-                        'urlTemplate' => route('sounds.index').'?q={search_term_string}',
-                    ],
-                    'query-input' => 'required name=search_term_string',
+            /*
+             * ── TWO GRAPHS, AND ONE THAT WAS REMOVED ─────────────────────
+             *
+             * WebSite is what Google's own site-names documentation calls
+             * the most important signal for the name it prints above a
+             * result. Without it the name is guessed, and the guess is
+             * usually the domain.
+             *
+             * Organization is the entity behind the site rather than the
+             * site itself — the pair is what a knowledge panel is built
+             * from. Nothing invented here: a name, an address and a logo
+             * when there is one.
+             *
+             * sameAs is the social profiles, and it is present only when
+             * there ARE any — array_filter below drops the key rather than
+             * emitting an empty list. It means "this organisation and that
+             * account are the same entity", which is exactly what the admin
+             * panel asks for when it says official accounts only. One list,
+             * entered once: the footer draws it and this claims it.
+             *
+             * WHAT CAME OUT: potentialAction / SearchAction, the sitelinks
+             * search box. Google retired that feature in October 2024 — the
+             * announcement is literally titled "Farewell, Sitelinks Search
+             * Box" — and the markup has done nothing since. Harmless, but
+             * markup that does nothing is markup somebody will one day try
+             * to debug.
+             */
+            'jsonld' => array_values(array_filter([
+                [
+                    '@context' => 'https://schema.org',
+                    '@type' => 'WebSite',
+                    'name' => config('app.name', 'dbelo'),
+                    'url' => route('home'),
                 ],
-            ],
+                array_filter([
+                    '@context' => 'https://schema.org',
+                    '@type' => 'Organization',
+                    'name' => config('app.name', 'dbelo'),
+                    'url' => route('home'),
+                    'logo' => \App\Support\Appearance::url('logo_light') ?: asset('og-default.png'),
+                    'sameAs' => \App\Support\Social::sameAs(),
+                ]),
+            ])),
         ]);
     }
 

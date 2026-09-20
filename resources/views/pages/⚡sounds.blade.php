@@ -67,9 +67,25 @@ new #[Layout('layouts.site')] #[Title('Sound effects')] class extends Component 
             'description' => $category
                 ? sprintf('Free %s sound effects, cleared for commercial use. Listen and download instantly.', strtolower($category->name))
                 : 'Browse thousands of studio-grade sound effects. Free to listen, cleared for commercial use.',
-            'canonical' => $category
-                ? route('sounds.index', ['category' => $category->slug])
-                : route('sounds.index'),
+            /*
+             * ── THE PAGE NUMBER SURVIVES, EVERYTHING ELSE DOES NOT ──────
+             *
+             * This was the bare category URL, which meant page four of the
+             * doors category told Google it was a copy of page one — and
+             * with it went every sound linked from pages two onwards, which
+             * on a catalogue is most of them.
+             *
+             * Canonical::for keeps the base's own query (the category IS
+             * the page) and merges only ?page. The filters never reach it:
+             * a filtered catalogue is noindex on the line below, so it has
+             * no canonical worth arguing about.
+             */
+            'canonical' => \App\Support\Canonical::for(
+                $category
+                    ? route('sounds.index', ['category' => $category->slug])
+                    : route('sounds.index'),
+                request()->query(),
+            ),
             'noindex' => $isFiltered,
         ]);
     }

@@ -4,10 +4,15 @@ use App\Console\Commands\RollupStatsCommand;
 use App\Console\Commands\RunBackupCommand;
 use App\Console\Commands\SendDigestCommand;
 use App\Jobs\QueueHeartbeat;
-use App\Models\ActivityLog;
 use App\Models\AbuseSignal;
+use App\Models\ActivityLog;
+use App\Models\CampaignSend;
+use App\Models\ErrorDaily;
 use App\Models\ErrorGroup;
 use App\Models\LoginAttempt;
+use App\Models\NotFound;
+use App\Models\SearchDaily;
+use App\Models\WebhookEvent;
 use App\Services\Alerts;
 use App\Services\BackupManager;
 use App\Services\Diagnostics;
@@ -84,6 +89,44 @@ Schedule::command('model:prune', ['--model' => [ActivityLog::class]])
 */
 Schedule::command('model:prune', ['--model' => [ErrorGroup::class]])
     ->dailyAt('03:30')
+    ->withoutOverlapping();
+
+/*
+| Pruning the tables that fill up with records nobody will ever read.
+|
+| Five of them, and none holds anything a person decided or a customer paid
+| for. The retention for each is on its own model, next to the reason:
+|
+|   NotFound      bot-scanned paths after a month; dispositioned ones after
+|                 six. An OPEN 404 is never pruned at any age.
+|   SearchDaily   a year of day-by-day detail. The term and its lifetime
+|                 count live on `searches` and stay forever.
+|   ErrorDaily    six months, matching the groups. The cascade only clears
+|                 these when a whole group goes, and an open group never does.
+|   WebhookEvent  settled events after ninety days — far past PayPal's
+|                 three-day retry window. Pending and failed are kept.
+|   CampaignSend  per-recipient rows after a year. The campaign keeps its
+|                 totals.
+|
+| DELIBERATELY NOT HERE: downloads and searches. Both grow forever and both
+| are the business rather than its exhaust — the free re-download window and
+| the whole of Analytics read the first, and the second is one row per term
+| no matter how many times it is typed. Deleting either is a product
+| decision, not housekeeping, and it does not belong in a job that runs at
+| 03:50 while nobody is watching.
+|
+| Written now, while every one of these tables is nearly empty. A retention
+| rule added the day a table becomes a problem is a retention rule written
+| under pressure, against data somebody has started to rely on.
+*/
+Schedule::command('model:prune', ['--model' => [
+    NotFound::class,
+    SearchDaily::class,
+    ErrorDaily::class,
+    WebhookEvent::class,
+    CampaignSend::class,
+]])
+    ->dailyAt('03:50')
     ->withoutOverlapping();
 
 /*

@@ -44,6 +44,28 @@ class Ads
         'legal.*', 'claims.create',
         'login', 'register', 'password.*', 'two-factor.*', 'verification.*',
         'admin.*', 'moderate', 'users', 'upload', 'library',
+
+        /*
+         * ADDED LATER, AND THE DOCBLOCK ABOVE HAD BEEN PROMISING THEM FOR
+         * MONTHS.
+         *
+         * It said "pricing, login and registration" while the list held only
+         * the last two. Nothing broke, because the page templates happen to
+         * carry no ad slot — so this was a rule that was true by accident,
+         * and would have quietly stopped being true the first time somebody
+         * added a slot to the shared page template.
+         *
+         * pages.show serves /about, /pricing and everything else written in
+         * the CMS. Excluding all of them is the right default: those pages
+         * are written to be read or to sell something, and neither improves
+         * with an advert in the middle.
+         */
+        'pages.show',
+        'settings.*', 'profile.*', 'billing.*', 'checkout.*', 'subscribe.*',
+        'sounds.download', 'favorites',
+        // NOT collections.* — a public pack is a catalogue page like any
+        // other, and excluding real content is how a list like this quietly
+        // becomes "no advertising anywhere".
     ];
 
     /**
@@ -93,7 +115,7 @@ class Ads
             'key' => 'ads.sound.code',
             'type' => 'code',
             'label' => 'Ad unit',
-            'help' => 'Placed under the player and above the description — deliberately far from the download button. An ad next to Download collects accidental clicks, and accidental clicks are what gets an account suspended.',
+            'help' => 'Below the licence, near the bottom of the page — deliberately far from the download button. It used to sit under the player, which earned more and put a 280px block two elements from Download: accidental clicks there cost the AdSense account, not the placement.',
         ],
         'sound_height' => [
             'key' => 'ads.sound.height',
@@ -167,8 +189,8 @@ class Ads
             'fields' => ['enabled', 'loader', 'test_mode', 'hide_for_subscribers'],
         ],
         'sound' => [
-            'label' => 'Sound page — under the player',
-            'note' => 'The highest-traffic page in a sound library, and the one people arrive on from Google.',
+            'label' => 'Sound page — below the licence',
+            'note' => 'The highest-traffic page in a sound library, and the one people arrive on from Google. The block sits after the licence, where the visitor has already listened and decided.',
             'fields' => ['sound_on', 'sound_code', 'sound_height'],
         ],
         'catalog' => [
@@ -205,7 +227,7 @@ class Ads
 
         $request ??= request();
 
-        if ($request->routeIs(...self::NEVER)) {
+        if (self::onExcludedRoute($request)) {
             return false;
         }
 
@@ -214,6 +236,65 @@ class Ads
         }
 
         return true;
+    }
+
+    /**
+     * Is this request for a page that never carries advertising?
+     *
+     * ── WHY THIS IS NOT JUST routeIs() ───────────────────────────────────
+     *
+     * On a Livewire update the request is a POST to the Livewire endpoint,
+     * so the current route is `default-livewire.update` and NOT the page the
+     * visitor is looking at. routeIs() therefore matches nothing in the list
+     * during every interaction on the site — the exclusion silently stops
+     * applying the moment anybody clicks something.
+     *
+     * Today no excluded route carries a slot, so nothing is wrong. That is
+     * the definition of a rule that is true by luck, and it would fail on the
+     * day a slot is added to one — the ad appearing only AFTER an
+     * interaction, which is the hardest kind of bug to reproduce.
+     *
+     * The referer is what the page actually was. It is untrusted input and is
+     * used here only to say NO to advertising, never to say yes, so the worst
+     * a forged one can do is hide an ad from the person who forged it.
+     */
+    private static function onExcludedRoute(Request $request): bool
+    {
+        if ($request->routeIs(...self::NEVER)) {
+            return true;
+        }
+
+        if (! $request->hasHeader('X-Livewire')) {
+            return false;
+        }
+
+        $referer = $request->headers->get('referer');
+
+        if (blank($referer)) {
+            return false;
+        }
+
+        $route = rescue(
+            fn () => app('router')->getRoutes()->match(
+                Request::create($referer)
+            ),
+            null,
+            false,
+        );
+
+        $name = $route?->getName();
+
+        if (blank($name)) {
+            return false;
+        }
+
+        foreach (self::NEVER as $pattern) {
+            if (\Illuminate\Support\Str::is($pattern, $name)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** Someone on a paid plan. A free account has no subscription row at all. */

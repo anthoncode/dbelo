@@ -1,13 +1,52 @@
 {{--
     The list picker.
 
+    ── THE ROOT ELEMENT IS UNCONDITIONAL, AND THAT IS THE FIX ───────────
+
+    Every press of the create button answered "Public method
+    [createCollection] not found on component" — for a method that is
+    public, is declared on this component, and passes every check the
+    framework's own source makes. The stack trace is what finally said why:
+
+        callMethods(Object(Livewire\Component@anonymous), ...)
+
+    An ANONYMOUS component. This component is a named class. The anonymous
+    one is the sound page itself, which is a single-file component. So the
+    call was never failing on this component — it was never arriving here.
+    It was going to the page, and the page has no method by that name.
+
+    Livewire decides which component a wire:click belongs to in the browser,
+    by walking up from the button to the nearest element it has registered
+    as a component root. If this component's root is not registered, the
+    walk carries on up and lands on the page. Everything in here — the
+    rows, the favourite toggle, this box — was talking to the wrong object.
+
+    The root used to be produced inside a Blade conditional: @ guest gave a
+    link, the other branch gave the panel. Livewire wraps every conditional
+    in HTML comment markers so its morph can tell the branches apart, so
+    this component's markup reached the browser as a marker, then the root,
+    then a closing marker — a component root nested inside a block instead
+    of being the block. The markers are handled by the PARENT's morph,
+    which is how the root ended up unregistered.
+
+    So there is now ONE root element, always, and the sign-in branch lives
+    inside it. A Livewire component should open with a plain element and
+    nothing else: no conditional, no loop, no comment.
+
+    ── ALPINE IS NOT ON THE ROOT EITHER ─────────────────────────────────
+    Same reasoning, one layer in. The Livewire root carries only what
+    Livewire puts there, and the open/closed state sits on a wrapper inside
+    it. Two frameworks claiming the same element is a coin toss nobody
+    needs to take, and `relative` has to travel with x-data anyway, since
+    the panel positions against whichever element owns the state.
+
     ── OPENING IS ALPINE, NOT LIVEWIRE ──────────────────────────────────
     The open/closed flag used to be a Livewire property, so every press of
     the trigger was a network round trip before anything moved — and the
     outside-click handler wrote to that same property, which is why closing
     lagged too, and sometimes did not happen at all when a re-render landed
-    first. A dropdown is pure interface state; it has no business leaving the
-    browser. The panel now opens on the same frame as the click.
+    first. A dropdown is pure interface state; it has no business leaving
+    the browser. The panel now opens on the same frame as the click.
 
     Livewire still owns everything INSIDE it. Alpine state survives a
     Livewire morph, so ticking a collection re-renders the rows without
@@ -24,114 +63,125 @@
     Same rule share-menu already documents: a dropdown is a menu, not part of
     the card that opened it, so it sets its own ink.
 --}}
+<div class="shrink-0">
+    @guest
+        {{-- Nothing to pick from until there is an account. A link rather
+             than a button that has to ask the server what to do about it. --}}
+        <a href="{{ route('login') }}" wire:navigate
+           class="flex items-center gap-2 rounded-full bg-surface px-4 py-2 text-[0.82rem] text-ink/70 shadow-soft-sm dark:bg-surface-dark dark:text-paper/70 transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:shadow-soft-md">
+            <x-icon name="folder-music" style="regular" class="text-[0.82rem]" />
+            Add to collection
+        </a>
+    @else
+        <div x-data="{ open: false }"
+             @keydown.escape.window="open = false"
+             @click.outside="open = false"
+             class="relative">
 
-@guest
-    {{-- Nothing to pick from until there is an account. A link rather than a
-         button that has to ask the server what to do about it. --}}
-    <a href="{{ route('login') }}" wire:navigate
-       class="flex shrink-0 items-center gap-2 rounded-full bg-surface px-4 py-2 text-[0.82rem] text-ink/70 shadow-soft-sm dark:bg-surface-dark dark:text-paper/70 transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:shadow-soft-md">
-        <x-icon name="folder-music" style="regular" class="text-[0.82rem]" />
-        Add to collection
-    </a>
-@else
-    <div x-data="{ open: false }"
-         @keydown.escape.window="open = false"
-         @click.outside="open = false"
-         class="relative">
+            <button type="button" x-on:click="open = ! open"
+                    class="flex shrink-0 items-center gap-2 rounded-full bg-surface px-4 py-2 text-[0.82rem] text-ink/70 shadow-soft-sm dark:bg-surface-dark dark:text-paper/70 transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:shadow-soft-md">
+                <x-icon name="folder-music" :style="count($this->memberOf) ? 'solid' : 'regular'"
+                        class="text-[0.82rem] {{ count($this->memberOf) ? 'text-brand' : '' }}" />
 
-        <button type="button" x-on:click="open = ! open"
-                class="flex shrink-0 items-center gap-2 rounded-full bg-surface px-4 py-2 text-[0.82rem] text-ink/70 shadow-soft-sm dark:bg-surface-dark dark:text-paper/70 transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:shadow-soft-md">
-            <x-icon name="folder-music" :style="count($this->memberOf) ? 'solid' : 'regular'"
-                    class="text-[0.82rem] {{ count($this->memberOf) ? 'text-brand' : '' }}" />
+                {{ count($this->memberOf)
+                    ? 'In '.count($this->memberOf).' '.Str::plural('list', count($this->memberOf))
+                    : 'Add to collection' }}
+            </button>
 
-            {{ count($this->memberOf)
-                ? 'In '.count($this->memberOf).' '.Str::plural('list', count($this->memberOf))
-                : 'Add to collection' }}
-        </button>
+            <div x-show="open" style="display: none" x-transition.opacity.duration.150ms
+                 class="absolute right-0 top-full z-50 mt-2 w-64 rounded-card bg-surface p-3 text-ink shadow-soft-lg dark:bg-surface-dark dark:text-paper">
 
-        <div x-show="open" style="display: none" x-transition.opacity.duration.150ms
-             class="absolute right-0 top-full z-50 mt-2 w-64 rounded-card bg-surface p-3 text-ink shadow-soft-lg dark:bg-surface-dark dark:text-paper">
+                {{-- Only once there is enough to search through. --}}
+                @if ($this->showSearch)
+                    <div class="relative mb-2.5">
+                        <input type="text" wire:model.live.debounce.200ms="search"
+                               placeholder="Search collections" autocomplete="off"
+                               class="w-full rounded-full border-0 bg-ink/[0.06] py-2 pl-4 pr-9 text-[0.84rem] text-ink placeholder:text-ink/40 focus:outline-none focus:ring-2 focus:ring-brand/30 dark:bg-paper/[0.08] dark:text-paper dark:placeholder:text-paper/40" />
 
-            {{-- Only once there is enough to search through. --}}
-            @if ($this->showSearch)
-                <div class="relative mb-2.5">
-                    <input type="text" wire:model.live.debounce.200ms="search"
-                           placeholder="Search collections" autocomplete="off"
-                           class="w-full rounded-full border-0 bg-ink/[0.06] py-2 pl-4 pr-9 text-[0.84rem] text-ink placeholder:text-ink/40 focus:outline-none focus:ring-2 focus:ring-brand/30 dark:bg-paper/[0.08] dark:text-paper dark:placeholder:text-paper/40" />
-
-                    <x-icon name="magnifying-glass" style="regular"
-                            class="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[0.78rem] text-ink/40 dark:text-paper/40" />
-                </div>
-            @endif
-
-            <div class="px-1 pb-1 text-[0.75rem] uppercase tracking-[0.1em] text-ink/35 dark:text-paper/35">
-                Add to collection
-            </div>
-
-            <div class="max-h-56 overflow-y-auto">
-
-                {{-- ═══ Favourites, always first ═══ --}}
-                <button type="button" wire:click="toggleFavourite"
-                        class="flex w-full items-center gap-2.5 rounded-control px-1.5 py-2 text-left transition hover:bg-ink/[0.05] dark:hover:bg-paper/[0.07]">
-                    <x-icon name="heart" :style="$this->favourited ? 'solid' : 'regular'"
-                            class="shrink-0 text-[0.82rem] {{ $this->favourited ? 'text-action' : 'text-ink/35 dark:text-paper/35' }}" />
-
-                    <span class="min-w-0 flex-1 truncate text-[0.88rem]">Favourites</span>
-
-                    <span class="shrink-0 text-[0.8rem] {{ $this->favourited ? 'text-ink/45 dark:text-paper/45' : 'text-action' }}">
-                        {{ $this->favourited ? 'Remove' : 'Add' }}
-                    </span>
-                </button>
-
-                @if ($this->allCollections->isNotEmpty())
-                    <div class="my-1 border-t border-ink/[0.07] dark:border-paper/10"></div>
+                        <x-icon name="magnifying-glass" style="regular"
+                                class="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[0.78rem] text-ink/40 dark:text-paper/40" />
+                    </div>
                 @endif
 
-                {{-- ═══ The person's own lists ═══ --}}
-                @forelse ($this->collections as $collection)
-                    @php $in = in_array($collection->id, $this->memberOf, true); @endphp
-
-                    <button type="button" wire:click="toggleCollection({{ $collection->id }})" wire:key="col-{{ $collection->id }}"
-                            class="flex w-full items-center gap-2.5 rounded-control px-1.5 py-2 text-left transition hover:bg-ink/[0.05] dark:hover:bg-paper/[0.07]">
-                        <x-icon name="folder-music" :style="$in ? 'solid' : 'regular'"
-                                class="shrink-0 text-[0.82rem] {{ $in ? 'text-brand' : 'text-ink/35 dark:text-paper/35' }}" />
-
-                        <span class="min-w-0 flex-1 truncate text-[0.88rem]">{{ $collection->name }}</span>
-
-                        <span class="shrink-0 text-[0.8rem] {{ $in ? 'text-ink/45 dark:text-paper/45' : 'text-action' }}">
-                            {{ $in ? 'Remove' : 'Add' }}
-                        </span>
-                    </button>
-                @empty
-                    @if ($this->allCollections->isNotEmpty())
-                        {{-- Filtered to nothing is not the same as having
-                             none, and "no collections" under a search box
-                             would be a lie. --}}
-                        <p class="px-1.5 py-2.5 text-[0.82rem] text-ink/40 dark:text-paper/40">
-                            Nothing matches “{{ $search }}”.
-                        </p>
-                    @endif
-                @endforelse
-            </div>
-
-            {{-- ═══ Make a new one ═══
-                 Outlined rather than filled, so it reads as somewhere to
-                 type instead of as one more row to press. --}}
-            <form wire:submit="create" class="mt-2.5">
-                <div class="flex items-center gap-2 rounded-control border border-ink/15 px-3 py-1.5 focus-within:border-brand/50 dark:border-paper/15">
-                    <input type="text" wire:model="newName" placeholder="Collection name" maxlength="80"
-                           class="min-w-0 flex-1 border-0 bg-transparent p-0 text-[0.88rem] text-ink placeholder:text-ink/40 focus:outline-none focus:ring-0 dark:text-paper dark:placeholder:text-paper/40" />
-
-                    <button type="submit" aria-label="Create collection"
-                            class="grid size-6 shrink-0 place-items-center rounded-full bg-action text-white transition hover:brightness-110">
-                        <x-icon name="plus" style="solid" class="text-[0.62rem]" />
-                    </button>
+                <div class="px-1 pb-1 text-[0.75rem] uppercase tracking-[0.1em] text-ink/35 dark:text-paper/35">
+                    Add to collection
                 </div>
 
-                @error('newName')
-                    <p class="mt-1.5 px-1 text-[0.78rem] text-danger">{{ $message }}</p>
-                @enderror
-            </form>
+                <div class="max-h-56 overflow-y-auto">
+
+                    {{-- ═══ Favourites, always first ═══ --}}
+                    <button type="button" wire:click="toggleFavourite"
+                            class="flex w-full items-center gap-2.5 rounded-control px-1.5 py-2 text-left transition hover:bg-ink/[0.05] dark:hover:bg-paper/[0.07]">
+                        <x-icon name="heart" :style="$this->favourited ? 'solid' : 'regular'"
+                                class="shrink-0 text-[0.82rem] {{ $this->favourited ? 'text-action' : 'text-ink/35 dark:text-paper/35' }}" />
+
+                        <span class="min-w-0 flex-1 truncate text-[0.88rem]">Favourites</span>
+
+                        <span class="shrink-0 text-[0.8rem] {{ $this->favourited ? 'text-ink/45 dark:text-paper/45' : 'text-action' }}">
+                            {{ $this->favourited ? 'Remove' : 'Add' }}
+                        </span>
+                    </button>
+
+                    @if ($this->allCollections->isNotEmpty())
+                        <div class="my-1 border-t border-ink/[0.07] dark:border-paper/10"></div>
+                    @endif
+
+                    {{-- ═══ The person's own lists ═══ --}}
+                    @forelse ($this->collections as $collection)
+                        @php $in = in_array($collection->id, $this->memberOf, true); @endphp
+
+                        <button type="button" wire:click="toggleCollection({{ $collection->id }})" wire:key="col-{{ $collection->id }}"
+                                class="flex w-full items-center gap-2.5 rounded-control px-1.5 py-2 text-left transition hover:bg-ink/[0.05] dark:hover:bg-paper/[0.07]">
+                            <x-icon name="folder-music" :style="$in ? 'solid' : 'regular'"
+                                    class="shrink-0 text-[0.82rem] {{ $in ? 'text-brand' : 'text-ink/35 dark:text-paper/35' }}" />
+
+                            <span class="min-w-0 flex-1 truncate text-[0.88rem]">{{ $collection->name }}</span>
+
+                            <span class="shrink-0 text-[0.8rem] {{ $in ? 'text-ink/45 dark:text-paper/45' : 'text-action' }}">
+                                {{ $in ? 'Remove' : 'Add' }}
+                            </span>
+                        </button>
+                    @empty
+                        @if ($this->allCollections->isNotEmpty())
+                            {{-- Filtered to nothing is not the same as having
+                                 none, and "no collections" under a search box
+                                 would be a lie. --}}
+                            <p class="px-1.5 py-2.5 text-[0.82rem] text-ink/40 dark:text-paper/40">
+                                Nothing matches “{{ $search }}”.
+                            </p>
+                        @endif
+                    @endforelse
+                </div>
+
+                {{-- ═══ Make a new one ═══
+
+                     No <form> here. A form submit is the one Livewire
+                     binding that travels through an event the browser owns,
+                     and while the component boundary was broken that was
+                     the only visible symptom, so the form was the first
+                     thing suspected. It was not the cause — see the note at
+                     the top — but the plain button is fewer moving parts
+                     for the same behaviour, so it stays.
+
+                     Outlined rather than filled, so it reads as somewhere to
+                     type instead of as one more row to press. --}}
+                <div class="mt-2.5">
+                    <div class="flex items-center gap-2 rounded-control border border-ink/15 px-3 py-1.5 focus-within:border-brand/50 dark:border-paper/15">
+                        <input type="text" wire:model="newName" wire:keydown.enter="createCollection"
+                               placeholder="Collection name" maxlength="80"
+                               class="min-w-0 flex-1 border-0 bg-transparent p-0 text-[0.88rem] text-ink placeholder:text-ink/40 focus:outline-none focus:ring-0 dark:text-paper dark:placeholder:text-paper/40" />
+
+                        <button type="button" wire:click="createCollection" aria-label="Create collection"
+                                class="grid size-6 shrink-0 place-items-center rounded-full bg-action text-white transition hover:brightness-110">
+                            <x-icon name="plus" style="solid" class="text-[0.62rem]" />
+                        </button>
+                    </div>
+
+                    @error('newName')
+                        <p class="mt-1.5 px-1 text-[0.78rem] text-danger">{{ $message }}</p>
+                    @enderror
+                </div>
+            </div>
         </div>
-    </div>
-@endguest
+    @endguest
+</div>

@@ -4,8 +4,11 @@ use App\Models\ActivityLog;
 use App\Models\Setting;
 use App\Providers\AppServiceProvider;
 use App\Support\SiteStatus;
+use App\Support\Social;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -30,6 +33,7 @@ new #[Layout('layouts.admin')] #[Title('General settings')] class extends Compon
         'siteName' => 'site.name',
         'siteDescription' => 'site.description',
         'footer' => 'site.footer',
+        'copyright' => 'site.copyright',
         'supportEmail' => 'legal.support_email',
         'adminEmail' => 'site.admin_email',
         'timezone' => 'timezone',
@@ -40,6 +44,7 @@ new #[Layout('layouts.admin')] #[Title('General settings')] class extends Compon
         'siteName' => 'Site name',
         'siteDescription' => 'Site description',
         'footer' => 'Footer text',
+        'copyright' => 'Copyright line',
         'supportEmail' => 'Support email',
         'adminEmail' => 'Admin email',
         'timezone' => 'Timezone',
@@ -52,6 +57,8 @@ new #[Layout('layouts.admin')] #[Title('General settings')] class extends Compon
 
     public string $footer = '';
 
+    public string $copyright = '';
+
     public string $supportEmail = '';
 
     public string $adminEmail = '';
@@ -63,9 +70,29 @@ new #[Layout('layouts.admin')] #[Title('General settings')] class extends Compon
     /* The site status is saved on its own — see setStatus(). */
     public string $status = SiteStatus::LIVE;
 
+    /**
+     * The social profiles, as rows: platform, label, url.
+     *
+     * A plain array property rather than seven string fields, because this
+     * is a LIST and the operator decides how long it is. Livewire binds into
+     * it by index — wire:model="social.2.url" — which is why every control
+     * in the repeater below carries a wire:key: without one, removing row 1
+     * leaves the browser showing row 2's old input with row 3's value in it.
+     *
+     * Only the three EDITABLE keys live here. The icon and the brand flag
+     * are derived from the platform by App\Support\Social and are not the
+     * operator's to set — an icon picker is a worse screen than the one it
+     * would save.
+     *
+     * @var array<int, array{platform: string, label: string, url: string}>
+     */
+    public array $social = [];
+
     public function mount(): void
     {
         abort_unless(auth()->user()?->isAdmin(), 403);
+
+        $this->syncSocial();
 
         $stored = Setting::cached();
 
@@ -91,6 +118,7 @@ new #[Layout('layouts.admin')] #[Title('General settings')] class extends Compon
             'siteName' => ['nullable', 'string', 'max:60'],
             'siteDescription' => ['nullable', 'string', 'max:160'],
             'footer' => ['nullable', 'string', 'max:300'],
+            'copyright' => ['nullable', 'string', 'max:200'],
             'supportEmail' => ['nullable', 'email', 'max:120'],
             'adminEmail' => ['nullable', 'email', 'max:120'],
             'timezone' => ['nullable', 'string', 'timezone'],
@@ -171,6 +199,190 @@ new #[Layout('layouts.admin')] #[Title('General settings')] class extends Compon
         session()->flash('ok', $status === SiteStatus::LIVE
             ? 'The site is open.'
             : 'The site is closed to visitors. You still see it because you are an admin.');
+    }
+
+    /* ═══════════════════════ Social profiles ═══════════════════════ */
+
+    /**
+     * Saved on its own, next to its own list.
+     *
+     * Not part of the Identity form below. A repeater inside a form is a
+     * repeater whose Remove buttons are all submit buttons unless every one
+     * of them says type="button", and the failure mode — clicking Remove and
+     * having the whole screen save — is the kind that gets discovered by the
+     * person who did not want to save the other six fields yet.
+     */
+    public function saveSocial(): void
+    {
+        $data = $this->validate([
+            'social' => ['array', 'max:'.Social::MAX],
+            'social.*.platform' => ['required', Rule::in(array_keys(Social::PLATFORMS))],
+            /*
+             * `url` alone accepts "facebook.com/dbelo", and a bare domain in
+             * an href is a RELATIVE path: /sounds/facebook.com/dbelo, which
+             * 404s from every page except the home one. starts_with is what
+             * makes the scheme non-optional, and it is also what keeps
+             * javascript: out of an attribute that lands on every page of
+             * the site.
+             */
+            'social.*.url' => ['required', 'url', 'starts_with:http://,https://', 'max:300'],
+            'social.*.label' => ['nullable', 'string', 'max:40'],
+        ], attributes: [
+            'social.*.url' => 'address',
+            'social.*.platform' => 'network',
+            'social.*.label' => 'name',
+        ]);
+
+        $before = Social::links();
+
+        Social::save($data['social'] ?? []);
+
+        $after = Social::links();
+
+        // The URLs themselves, not a count. "Social profiles changed" tells
+        // you nothing six weeks later; the old address is the thing somebody
+        // will be trying to get back.
+        if ($this->describeSocial($before) !== $this->describeSocial($after)) {
+            ActivityLog::record(
+                'settings.updated',
+                null,
+                'Social profiles changed',
+                [
+                    'setting' => Social::KEY,
+                    'from' => $this->describeSocial($before) ?: null,
+                    'to' => $this->describeSocial($after) ?: null,
+                ],
+            );
+        }
+
+        // Read back rather than trust what was typed. Social::save() drops a
+        // second profile for a platform that already has one, and a row that
+        // silently vanishes on the next page load is worse than one that
+        // visibly vanishes now.
+        $this->syncSocial();
+
+        session()->flash('ok', $this->social === []
+            ? 'Saved. The footer shows no profiles.'
+            : 'Saved — '.count($this->social).' '.Str::plural('profile', count($this->social)).' in the footer.');
+    }
+
+    public function addSocial(): void
+    {
+        if (count($this->social) >= Social::MAX) {
+            return;
+        }
+
+        // Blank platform, not a guess. A row that arrives pre-set to
+        // Facebook is a row somebody saves as Facebook by accident.
+        $this->social[] = ['platform' => '', 'label' => '', 'url' => ''];
+    }
+
+    public function removeSocial(int $index): void
+    {
+        unset($this->social[$index]);
+
+        // Reindexed, because Livewire binds by position: leaving a hole at 1
+        // means row 2 keeps binding to social.2 while the list draws it
+        // second, and the next edit lands in the wrong row.
+        $this->social = array_values($this->social);
+
+        $this->resetValidation();
+    }
+
+    /** @param  int  $direction  -1 up, 1 down */
+    public function moveSocial(int $index, int $direction): void
+    {
+        $target = $index + $direction;
+
+        if (! isset($this->social[$index], $this->social[$target])) {
+            return;
+        }
+
+        [$this->social[$index], $this->social[$target]] = [$this->social[$target], $this->social[$index]];
+
+        $this->resetValidation();
+    }
+
+    /** What is actually stored, reduced to the three editable fields. */
+    private function syncSocial(): void
+    {
+        $this->social = array_map(fn (array $row) => [
+            'platform' => $row['platform'],
+            'label' => $row['platform'] === 'link' ? $row['label'] : '',
+            'url' => $row['url'],
+        ], Social::links());
+    }
+
+    /** @param  array<int, array<string, mixed>>  $rows */
+    private function describeSocial(array $rows): string
+    {
+        return implode(', ', array_map(fn ($row) => $row['platform'].' '.$row['url'], $rows));
+    }
+
+    /* ═══════════════════════ Community collections ═══════════════════════ */
+
+    /**
+     * Do search engines get to keep the listed collections?
+     *
+     * ── WHY THIS IS AN ADMIN DECISION AND NOT THE OWNER'S ────────────────
+     *
+     * A collection's owner decides who can SEE it: private, link-only, or in
+     * the directory. None of those three is a decision about search engines,
+     * because the consequence of indexing is not felt by the owner — it is
+     * felt by the domain. Forty collections named "Podcast", written by
+     * forty people, all competing with the catalogue for the same words, is
+     * dbelo's problem. So it is dbelo's switch, and it is off until somebody
+     * decides the collections are good enough to want found.
+     *
+     * It only ever affects LISTED collections. Private and unlisted ones are
+     * noindex whatever this says — see Collection::isIndexable().
+     *
+     * Saved on its own, immediately, like the site status: a control with a
+     * consequence outside this screen should not ride along with a Save
+     * button that also renames the footer.
+     */
+    public function setCollectionsIndexable(bool $indexable): void
+    {
+        $from = filter_var(Setting::read('collections.indexable', false), FILTER_VALIDATE_BOOLEAN);
+
+        if ($from === $indexable) {
+            return;
+        }
+
+        // Stored as a string because the settings table is a string store.
+        // '' would read as "nobody changed this" and fall back to the config
+        // default, so OFF has to be written as '0' rather than as empty.
+        Setting::put('collections.indexable', $indexable ? '1' : '0', 'general');
+
+        ActivityLog::record(
+            'settings.updated',
+            null,
+            $indexable
+                ? 'Listed collections opened to search engines'
+                : 'Listed collections closed to search engines',
+            ['setting' => 'collections.indexable', 'from' => $from ? '1' : '0', 'to' => $indexable ? '1' : '0'],
+        );
+
+        unset($this->collectionsIndexable);
+
+        session()->flash('ok', $indexable
+            ? 'Listed collections can now be indexed. It takes search engines days to notice.'
+            : 'Listed collections are no longer offered to search engines.');
+    }
+
+    #[Computed]
+    public function collectionsIndexable(): bool
+    {
+        return filter_var(Setting::read('collections.indexable', false), FILTER_VALIDATE_BOOLEAN);
+    }
+
+    /** How many are actually in the directory right now. */
+    #[Computed]
+    public function listedCount(): int
+    {
+        return Schema::hasTable('collections')
+            ? \App\Models\Collection::listed()->count()
+            : 0;
     }
 
     /* ═════════════════════════════ Helpers ═════════════════════════════ */
@@ -342,6 +554,89 @@ new #[Layout('layouts.admin')] #[Title('General settings')] class extends Compon
         </div>
 
         {{-- ══════════════════════════════════════════════════════════════
+             COMMUNITY COLLECTIONS
+
+             One switch, and it governs search engines only. Who can SEE a
+             collection is its owner's choice — private, link-only, or listed
+             in the directory — and nothing on this screen overrules that.
+             ══════════════════════════════════════════════════════════════ --}}
+        <div class="rounded-2xl border border-hairline bg-panel">
+            <div class="border-b border-hairline px-5 py-4">
+                <h2 class="text-[0.95rem] font-medium">Collections and search engines</h2>
+                <p class="mt-0.5 max-w-[74ch] text-[0.78rem] leading-relaxed text-paper/40">
+                    Users decide who can open their collections. This decides whether the ones they chose to
+                    <span class="text-paper/55">list</span> may also be indexed. Private and link-only collections are
+                    never indexed, whichever of these is chosen.
+                    <span class="text-paper/55">{{ $this->listedCount }}</span>
+                    {{ Str::plural('collection', $this->listedCount) }}
+                    {{ $this->listedCount === 1 ? 'is' : 'are' }} listed right now.
+                </p>
+            </div>
+
+            <div class="grid gap-3 px-5 py-5 sm:grid-cols-2">
+                <button type="button" wire:click="setCollectionsIndexable(false)"
+                        @class([
+                            'rounded-xl border px-4 py-4 text-left transition',
+                            'border-info/40 bg-info/[0.08]' => ! $this->collectionsIndexable,
+                            'border-hairline bg-raised hover:border-paper/20' => $this->collectionsIndexable,
+                        ])>
+                    <div class="flex items-center gap-2.5">
+                        <span @class([
+                            'grid size-8 shrink-0 place-items-center rounded-full',
+                            'bg-info/15 text-info' => ! $this->collectionsIndexable,
+                            'bg-paper/[0.06] text-paper/40' => $this->collectionsIndexable,
+                        ])>
+                            <x-icon name="eye-slash" style="solid" class="text-[0.8rem]" />
+                        </span>
+
+                        <span class="text-[0.9rem] {{ ! $this->collectionsIndexable ? 'text-paper' : 'text-paper/70' }}">
+                            Hidden from search
+                        </span>
+
+                        @if (! $this->collectionsIndexable)
+                            <span class="ml-auto text-[0.68rem] uppercase tracking-[0.16em] text-paper/30">Now</span>
+                        @endif
+                    </div>
+
+                    <p class="mt-2.5 text-[0.78rem] leading-relaxed text-paper/40">
+                        The directory works for people and is invisible to Google. Dozens of collections named
+                        “Podcast” never get to compete with the catalogue for the same words.
+                    </p>
+                </button>
+
+                <button type="button" wire:click="setCollectionsIndexable(true)"
+                        @class([
+                            'rounded-xl border px-4 py-4 text-left transition',
+                            'border-warning/40 bg-warning/[0.08]' => $this->collectionsIndexable,
+                            'border-hairline bg-raised hover:border-paper/20' => ! $this->collectionsIndexable,
+                        ])>
+                    <div class="flex items-center gap-2.5">
+                        <span @class([
+                            'grid size-8 shrink-0 place-items-center rounded-full',
+                            'bg-warning/15 text-warning' => $this->collectionsIndexable,
+                            'bg-paper/[0.06] text-paper/40' => ! $this->collectionsIndexable,
+                        ])>
+                            <x-icon name="magnifying-glass" style="solid" class="text-[0.8rem]" />
+                        </span>
+
+                        <span class="text-[0.9rem] {{ $this->collectionsIndexable ? 'text-paper' : 'text-paper/70' }}">
+                            Open to search
+                        </span>
+
+                        @if ($this->collectionsIndexable)
+                            <span class="ml-auto text-[0.68rem] uppercase tracking-[0.16em] text-paper/30">Now</span>
+                        @endif
+                    </div>
+
+                    <p class="mt-2.5 text-[0.78rem] leading-relaxed text-paper/40">
+                        Listed collections may be indexed. Worth it only once they are good enough to want found —
+                        and remember the names are written by users, not by dbelo.
+                    </p>
+                </button>
+            </div>
+        </div>
+
+        {{-- ══════════════════════════════════════════════════════════════
              IDENTITY
 
              Six fields. The plan had ten; three were dropped and the reasons
@@ -410,6 +705,33 @@ new #[Layout('layouts.admin')] #[Title('General settings')] class extends Compon
                     </x-admin.setting-field>
 
                     <x-admin.setting-field
+                        label="Copyright line"
+                        name="copyright"
+                        :default="$this->fallback('copyright')"
+                        affects="The last line of every page, under the footer columns."
+                        warning="Write {year}, not the year. It is replaced when the page is drawn — a line typed out as 2026 stays 2026 through next January, and the person who typed it is the last one who will notice.">
+                        <input type="text" wire:model.live="copyright" maxlength="200"
+                               class="w-full rounded-lg border-0 bg-raised px-3 py-2.5 text-[0.84rem] focus:outline-none focus:ring-1 focus:ring-brand" />
+
+                        {{-- The tokens, and what the line actually reads as.
+                             A field with a placeholder syntax needs to show
+                             its own output, or the syntax is a guess. --}}
+                        <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.76rem] text-paper/30">
+                            <span><span class="font-mono text-paper/55">{year}</span> → {{ date('Y') }}</span>
+                            <span><span class="font-mono text-paper/55">{site}</span> → {{ config('app.name', 'dbelo') }}</span>
+                        </div>
+
+                        <p class="mt-2 text-[0.8rem] text-paper/45">
+                            <x-icon name="eye" style="solid" class="mr-1 text-[0.72rem] text-info" />
+                            Reads as
+                            {{-- The typed value, not the saved one. A
+                                 preview that only updates after Save is a
+                                 preview of the wrong thing. --}}
+                            <span class="text-paper/75">{{ \App\Support\FooterLinks::fillTokens($copyright ?: $this->fallback('copyright')) ?: '—' }}</span>
+                        </p>
+                    </x-admin.setting-field>
+
+                    <x-admin.setting-field
                         label="Support email"
                         name="supportEmail"
                         :default="$this->fallback('supportEmail')"
@@ -471,6 +793,160 @@ new #[Layout('layouts.admin')] #[Title('General settings')] class extends Compon
                 </div>
             </div>
         </form>
+
+        {{-- ══════════════════════════════════════════════════════════════
+             SOCIAL PROFILES
+
+             A LIST, not a field per network. Fixed fields are simpler to
+             build and wrong within a year: Bluesky did not exist, Vine did,
+             and whatever replaces TikTok is not named yet. Every one of
+             those would be a migration and a deploy.
+
+             The network is still CHOSEN from a list, though — free text
+             would mean asking somebody to pick an icon, and an icon picker
+             is a worse screen than the one it saves. Anything missing from
+             the catalogue is "Other", which draws a plain chain and takes
+             the name typed beside it.
+
+             Outside the Identity form on purpose: a repeater inside a form
+             is a repeater whose Remove buttons submit it.
+             ══════════════════════════════════════════════════════════════ --}}
+        <div class="rounded-2xl border border-hairline bg-panel">
+            <div class="flex flex-wrap items-start justify-between gap-3 border-b border-hairline px-5 py-4">
+                <div>
+                    <h2 class="text-[0.95rem] font-medium">Social profiles</h2>
+                    <p class="mt-0.5 max-w-[74ch] text-[0.78rem] leading-relaxed text-paper/40">
+                        Drawn at the bottom of every page, in this order. They also go into the site's
+                        <span class="font-mono text-paper/55">sameAs</span> markup, which is how a search engine
+                        learns that this site and that profile are the same thing — so official accounts only.
+                    </p>
+                </div>
+
+                <button type="button" wire:click="addSocial"
+                        @disabled(count($social) >= \App\Support\Social::MAX)
+                        class="shrink-0 rounded-lg bg-raised px-4 py-2 text-[0.8rem] transition hover:bg-paper/[0.09] disabled:opacity-40">
+                    <x-icon name="plus" style="solid" class="mr-1 text-[0.72rem]" />
+                    Add a profile
+                </button>
+            </div>
+
+            @if ($social === [])
+                <div class="px-5 py-10 text-center">
+                    <p class="text-[0.86rem] text-paper/45">No profiles yet.</p>
+                    <p class="mt-1 text-[0.78rem] text-paper/30">
+                        The footer shows nothing here until one is added — five grey circles linking to accounts
+                        that do not exist yet is worse than an empty row.
+                    </p>
+                </div>
+            @else
+                <div class="divide-y divide-hairline">
+                    @foreach ($social as $i => $row)
+                        {{-- wire:key on the ROW, keyed by position.
+                             Livewire binds into the array by index, so a row
+                             without a key keeps the previous row's DOM after
+                             a removal and shows one value while editing
+                             another. --}}
+                        <div wire:key="social-row-{{ $i }}" class="px-5 py-4">
+                            <div class="flex flex-wrap items-center gap-3">
+
+                                {{-- The mark that will actually be drawn.
+                                     The point of choosing from a catalogue
+                                     is seeing what the choice looks like. --}}
+                                @php
+                                    $meta = \App\Support\Social::PLATFORMS[$row['platform']] ?? null;
+                                @endphp
+
+                                <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-raised text-paper/60">
+                                    @if ($meta && $row['platform'] !== 'link')
+                                        <x-icon :name="$meta['icon']" style="brands" class="text-[1rem]" />
+                                    @elseif ($meta)
+                                        <x-icon name="link" style="solid" class="text-[0.9rem]" />
+                                    @else
+                                        <x-icon name="question" style="solid" class="text-[0.9rem] text-paper/25" />
+                                    @endif
+                                </span>
+
+                                <select wire:model.live="social.{{ $i }}.platform"
+                                        class="w-[10rem] shrink-0 rounded-lg border-0 bg-raised px-3 py-2.5 text-[0.84rem] focus:outline-none focus:ring-1 focus:ring-brand">
+                                    <option value="">Network…</option>
+                                    @foreach (\App\Support\Social::PLATFORMS as $key => $platform)
+                                        <option value="{{ $key }}">{{ $platform['label'] }}</option>
+                                    @endforeach
+                                </select>
+
+                                <div class="min-w-[15rem] flex-1">
+                                    <input type="url" wire:model="social.{{ $i }}.url"
+                                           placeholder="https://facebook.com/dbelo"
+                                           class="w-full rounded-lg border-0 bg-raised px-3 py-2.5 text-[0.84rem] focus:outline-none focus:ring-1 focus:ring-brand" />
+                                </div>
+
+                                {{-- Only "Other" gets a name of its own.
+                                     For a known network the catalogue's name
+                                     wins — "Facebook" is what a screen
+                                     reader should say, whatever was typed —
+                                     so showing the box would be showing a
+                                     field that does nothing. --}}
+                                @if ($row['platform'] === 'link')
+                                    <input type="text" wire:model="social.{{ $i }}.label" maxlength="40"
+                                           placeholder="What to call it"
+                                           class="w-[11rem] shrink-0 rounded-lg border-0 bg-raised px-3 py-2.5 text-[0.84rem] focus:outline-none focus:ring-1 focus:ring-brand" />
+                                @endif
+
+                                <div class="ml-auto flex shrink-0 items-center gap-1">
+                                    <button type="button" wire:click="moveSocial({{ $i }}, -1)"
+                                            @disabled($loop->first) aria-label="Move up"
+                                            class="grid size-8 place-items-center rounded-lg text-paper/40 transition hover:bg-raised hover:text-paper disabled:opacity-20 disabled:hover:bg-transparent">
+                                        <x-icon name="chevron-up" style="solid" class="text-[0.72rem]" />
+                                    </button>
+
+                                    <button type="button" wire:click="moveSocial({{ $i }}, 1)"
+                                            @disabled($loop->last) aria-label="Move down"
+                                            class="grid size-8 place-items-center rounded-lg text-paper/40 transition hover:bg-raised hover:text-paper disabled:opacity-20 disabled:hover:bg-transparent">
+                                        <x-icon name="chevron-down" style="solid" class="text-[0.72rem]" />
+                                    </button>
+
+                                    {{-- No confirmation. Removing a row here
+                                         does nothing until Save, and a
+                                         dialogue in front of a reversible
+                                         action is how people learn to click
+                                         through dialogues. --}}
+                                    <button type="button" wire:click="removeSocial({{ $i }})"
+                                            aria-label="Remove this profile"
+                                            class="grid size-8 place-items-center rounded-lg text-paper/40 transition hover:bg-danger/15 hover:text-danger">
+                                        <x-icon name="xmark" style="solid" class="text-[0.8rem]" />
+                                    </button>
+                                </div>
+                            </div>
+
+                            @error("social.{$i}.platform")
+                                <p class="mt-2 text-[0.78rem] text-danger">{{ $message }}</p>
+                            @enderror
+
+                            @error("social.{$i}.url")
+                                <p class="mt-2 text-[0.78rem] text-danger">{{ $message }}</p>
+                            @enderror
+
+                            @error("social.{$i}.label")
+                                <p class="mt-2 text-[0.78rem] text-danger">{{ $message }}</p>
+                            @enderror
+                        </div>
+                    @endforeach
+                </div>
+            @endif
+
+            <div class="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-5 py-4">
+                <p class="text-[0.78rem] text-paper/30">
+                    The address needs its <span class="font-mono text-paper/55">https://</span> — without a scheme a
+                    browser reads it as a path on this site.
+                </p>
+
+                <button type="button" wire:click="saveSocial" wire:loading.attr="disabled" wire:target="saveSocial"
+                        class="shrink-0 rounded-lg bg-brand px-5 py-2.5 text-[0.82rem] text-white transition hover:brightness-110 disabled:opacity-50">
+                    <span wire:loading.remove wire:target="saveSocial">Save profiles</span>
+                    <span wire:loading wire:target="saveSocial">Saving…</span>
+                </button>
+            </div>
+        </div>
 
         {{-- ══════════════════════════════════════════════════════════════
              WHAT IS NOT HERE
