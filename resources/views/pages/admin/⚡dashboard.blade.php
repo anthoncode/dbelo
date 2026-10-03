@@ -2,6 +2,7 @@
 
 use App\Models\Download;
 use App\Models\Sound;
+use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Stats;
 use App\Support\Clock;
@@ -164,6 +165,43 @@ new #[Layout('layouts.admin')] #[Title('Dashboard')] class extends Component {
 
         $idle = $this->stats()->deadStock(90);
 
+        /*
+         * ── MONEY ────────────────────────────────────────────────────────
+         *
+         * Read from the TRANSACTIONS TABLE, not from stats_daily, following
+         * the rule at the top of this file: the tiles read source tables so
+         * they are exact and true whether or not anything is scheduled.
+         * Analytics reads the rollup because it draws a time series; this
+         * draws three numbers, and three numbers can be counted directly.
+         *
+         * It also means the one figure an operator will check twice cannot
+         * be stale because a cron entry was lost in a deploy.
+         *
+         * By paid_at, never created_at: a row is created when the webhook
+         * lands, and the webhook can arrive the next day. The day the money
+         * was taken is the only date that will match what PayPal reports.
+         *
+         * earned() excludes refunds entirely rather than netting them off.
+         * A refund is not a smaller sale.
+         */
+        $gross = fn ($from = null, $to = null) => (int) Transaction::query()
+            ->earned()
+            ->when($from, fn ($q) => $q->where('paid_at', '>=', $from))
+            ->when($to, fn ($q) => $q->where('paid_at', '<', $to))
+            ->sum('amount_cents');
+
+        $earnedAll = $gross();
+        $earned7 = $gross($week);
+
+        // Half-open, like the downloads comparison above and for the same
+        // reason: whereBetween would count the instant at $week in both
+        // periods and make the percentage quietly wrong.
+        $earnedPrev7 = $gross($prevWeek, $week);
+
+        $netAll = (int) Transaction::query()->earned()->sum('net_cents');
+
+        $money = fn (int $cents) => '$'.number_format($cents / 100, 2);
+
         return [
             [
                 'label' => 'Sounds published',
@@ -195,6 +233,35 @@ new #[Layout('layouts.admin')] #[Title('Dashboard')] class extends Component {
                 'delta' => User::real()->where('created_at', '>=', $week)->count(),
                 'deltaLabel' => 'signed up this week',
                 'change' => null,
+            ],
+            [
+                /*
+                 * THE QUESTION THE OTHER FOUR TILES CANNOT ANSWER.
+                 *
+                 * Catalogue, demand, audience and waste — and not one of
+                 * them says whether any of it pays. That is the question
+                 * somebody opens this panel on a Monday to ask.
+                 *
+                 * Gross in the big figure and net in the note, both. Gross
+                 * alone overstates the business by whatever the gateway
+                 * charged that month, and net alone hides what the gateway
+                 * is costing. The pair is the only honest version.
+                 */
+                'label' => 'Revenue',
+                'icon' => 'dollar-sign',
+                'tone' => 'success',
+                'value' => $earnedAll,
+                // The formatted string wins over number_format() in the
+                // template. Cents in the data, dollars on the screen, and
+                // the conversion in exactly one place.
+                'display' => $money($earnedAll),
+                'delta' => $earned7,
+                'deltaDisplay' => $money($earned7),
+                'deltaLabel' => 'this week',
+                'change' => $earnedPrev7 > 0
+                    ? (int) round(($earned7 - $earnedPrev7) / $earnedPrev7 * 100)
+                    : null,
+                'note' => $earnedAll > 0 ? $money($netAll).' after fees' : 'no payments yet',
             ],
             [
                 /*
@@ -283,7 +350,11 @@ new #[Layout('layouts.admin')] #[Title('Dashboard')] class extends Component {
     {{-- ══════════════════════════════════════════════════════════════
          TILES
          ══════════════════════════════════════════════════════════════ --}}
-    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    {{-- Five across at xl, not four. The tiles are a little narrower and
+         they stay one row — which is the whole point of a tile strip: five
+         facts read in one sweep, without a second row that reads as a
+         different, lesser group. --}}
+    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         @foreach ($this->tiles as $tile)
             <div class="group rounded-2xl border border-hairline bg-panel p-5 transition duration-300 ease-dbelo hover:border-brand/30"
                  wire:key="tile-{{ $loop->index }}">
@@ -304,8 +375,13 @@ new #[Layout('layouts.admin')] #[Title('Dashboard')] class extends Component {
                 </div>
 
                 <div class="mt-3 flex items-baseline gap-2">
+                    {{-- `display` is for a tile whose value is not a plain
+                         count — money, which is stored in cents and read in
+                         dollars. Everything else still goes through
+                         number_format, so a tile that does not set it
+                         behaves exactly as before. --}}
                     <span class="text-[2rem] font-semibold leading-none tracking-[-0.03em] tabular-nums">
-                        {{ number_format($tile['value']) }}
+                        {{ $tile['display'] ?? number_format($tile['value']) }}
                     </span>
 
                     @if ($tile['suffix'] ?? null)
@@ -323,7 +399,7 @@ new #[Layout('layouts.admin')] #[Title('Dashboard')] class extends Component {
                             'tabular-nums',
                             'text-success' => $tile['delta'] > 0,
                             'text-paper/30' => $tile['delta'] === 0,
-                        ])>+{{ number_format($tile['delta']) }}</span>
+                        ])>+{{ $tile['deltaDisplay'] ?? number_format($tile['delta']) }}</span>
 
                         <span class="text-paper/40">{{ $tile['deltaLabel'] }}</span>
                     @endif

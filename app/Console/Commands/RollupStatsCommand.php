@@ -84,6 +84,73 @@ class RollupStatsCommand extends Command
                 DB::table('subscriptions')->whereBetween('created_at', [$from, $to])->count());
         }
 
+        /*
+         * ── MONEY ────────────────────────────────────────────────────────
+         *
+         * IN CENTS, as integers, because stats_daily.value is an integer
+         * column and money in a float is a rounding error waiting for
+         * somebody to notice. The screen divides by 100 at the last
+         * possible moment; nothing between here and there sees a decimal.
+         *
+         * BY paid_at, NOT created_at. Every other metric here ranges over
+         * created_at, and copying that would have been wrong: a row is
+         * created when the webhook arrives, and the webhook can arrive
+         * minutes after the payment or be retried the next day. The day the
+         * money was taken is the day it belongs to, and it is the only date
+         * that will ever match what PayPal reports.
+         *
+         * earned() is the Transaction scope: status completed, refunds
+         * excluded entirely rather than netted off. A refund is not a
+         * smaller sale, it is a sale that stopped existing, and a total that
+         * averages the two describes neither. Refunds get their own metric
+         * below, which is also what makes them visible instead of just
+         * absent.
+         */
+        if (DB::getSchemaBuilder()->hasTable('transactions')) {
+            $earned = fn () => DB::table('transactions')
+                ->where('status', 'completed')
+                ->whereBetween('paid_at', [$from, $to]);
+
+            StatDaily::put($day, 'revenue', '', (int) $earned()->sum('amount_cents'));
+
+            /*
+             * What actually arrived. The gap between this and the line above
+             * is PayPal's cut, and it is the number that pays for the
+             * server — a gross figure on its own quietly overstates the
+             * business by whatever the gateway charges that month.
+             */
+            StatDaily::put($day, 'revenue.net', '', (int) $earned()->sum('net_cents'));
+
+            // How many payments, not how much. Revenue going up because one
+            // person bought a yearly plan and revenue going up because
+            // thirty people bought a day pass are different events, and only
+            // this number tells them apart.
+            StatDaily::put($day, 'orders', '', $earned()->count());
+
+            /*
+             * Refunded ON THIS DAY, by refunded_at — not by the day of the
+             * original sale. Rewriting an old day when a refund lands would
+             * change a figure somebody already read, and the point of a
+             * daily rollup is that yesterday stops moving.
+             */
+            StatDaily::put($day, 'refunds', '', (int) DB::table('transactions')
+                ->whereIn('status', ['refunded', 'partially_refunded'])
+                ->whereBetween('refunded_at', [$from, $to])
+                ->sum('amount_cents'));
+
+            // Per plan, labelled by slug. Low cardinality like the category
+            // breakdown above, so a row each is cheap and the panel never
+            // has to touch the transactions table again.
+            DB::table('transactions')
+                ->leftJoin('plans', 'plans.id', '=', 'transactions.plan_id')
+                ->where('transactions.status', 'completed')
+                ->whereBetween('transactions.paid_at', [$from, $to])
+                ->groupBy('plans.slug')
+                ->get(['plans.slug', DB::raw('SUM(transactions.amount_cents) as total')])
+                ->each(fn ($row) => StatDaily::put($day, 'revenue.plan',
+                    $row->slug ?? 'no plan', (int) $row->total));
+        }
+
         // ── Catalogue ──
         StatDaily::put($day, 'published', '',
             DB::table('sounds')->whereNull('deleted_at')->whereBetween('published_at', [$from, $to])->count());

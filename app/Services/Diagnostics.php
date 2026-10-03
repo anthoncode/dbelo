@@ -598,17 +598,49 @@ class Diagnostics
             return null;
         }
 
-        $top = Cache::remember('diagnostics.table.sizes', now()->addMinutes(30), function () {
-            return DB::select(
+        /*
+         * ── PLAIN ARRAYS INTO THE CACHE, NEVER THE DB ROWS ───────────────
+         *
+         * DB::select() returns stdClass objects. Caching them put a
+         * serialized object graph into the cache table, and reading it back
+         * produced:
+         *
+         *   The script tried to access a property on an incomplete object.
+         *   Please ensure the class definition "stdClass" … was loaded
+         *   before unserialize()
+         *
+         * stdClass is obviously always loaded. That message means unserialize
+         * FAILED and handed back __PHP_Incomplete_Class — which here comes
+         * from the payload itself: these values are read from
+         * information_schema, whose strings do not always come back in the
+         * connection's charset, and a serialized string whose byte-length
+         * prefix no longer matches its bytes cannot be rebuilt.
+         *
+         * Scalars in a plain array have no length prefixes to disagree with
+         * and no class to rebuild. Cast explicitly so whatever the driver
+         * hands over — string, int, or a numeric string — is pinned to one
+         * type before it is stored.
+         *
+         * rows_estimate was selected and never read, so it is gone too.
+         *
+         * THE KEY IS v2 ON PURPOSE. The old one may still hold a poisoned
+         * value with half an hour left to live, and a check that stays
+         * broken for thirty minutes after the fix is a fix nobody believes.
+         * A new key ignores it; the old one expires on its own.
+         */
+        $top = Cache::remember('diagnostics.table.sizes.v2', now()->addMinutes(30), function () {
+            return array_map(fn ($row) => [
+                'name' => (string) $row->name,
+                'mb' => (float) $row->mb,
+            ], DB::select(
                 'select table_name as name,
-                        table_rows as rows_estimate,
                         round((data_length + index_length) / 1024 / 1024, 1) as mb
                  from information_schema.tables
                  where table_schema = ?
                  order by (data_length + index_length) desc
                  limit 5',
                 [DB::connection()->getDatabaseName()],
-            );
+            ));
         });
 
         if ($top === []) {
@@ -624,7 +656,7 @@ class Diagnostics
         });
 
         $parts = array_map(
-            fn ($row) => $row->name.' '.$row->mb.' MB',
+            fn (array $row) => $row['name'].' '.$row['mb'].' MB',
             array_slice($top, 0, 3),
         );
 

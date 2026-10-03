@@ -3,9 +3,11 @@
 namespace App\Providers;
 
 use App\Listeners\RecordAuthEvents;
+use App\Listeners\RecordScheduledTaskFailure;
 use App\Models\Setting;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Console\Events\ScheduledTaskFailed;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Date;
@@ -33,6 +35,32 @@ class AppServiceProvider extends ServiceProvider
          * without anybody remembering to add it.
          */
         Event::subscribe(RecordAuthEvents::class);
+
+        /*
+         * Scheduled tasks that fail, recorded with the task's name.
+         *
+         * Without this, every failing Schedule::call() and Schedule::job()
+         * in the application reports the same anonymous sentence —
+         * "Scheduled command [] failed with exit code [1]." — from the same
+         * line of Laravel, into one error group that cannot say which task
+         * broke. Laravel knows which one; it passes the whole task object in
+         * this event, and nobody was listening.
+         *
+         * The listener also makes the returns-false case legible: a closure
+         * that returns false is recorded as a failure with nothing thrown
+         * and nothing in the log, which is the hardest version of this to
+         * diagnose and the easiest to write by accident.
+         */
+        /*
+         * Event and listener both, spelled out.
+         *
+         * The one-argument form — Event::listen(SomeListener::class) — asks
+         * the framework to infer the event from the handle() type hint, and
+         * whether it does depends on the version. A registration that
+         * silently does not register is the worst kind: nothing errors, and
+         * the thing it was meant to record simply never appears.
+         */
+        Event::listen(ScheduledTaskFailed::class, RecordScheduledTaskFailure::class);
 
         $this->applySettings();
 

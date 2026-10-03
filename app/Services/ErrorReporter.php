@@ -115,6 +115,51 @@ class ErrorReporter
             return false;
         }
 
+        /*
+         * Laravel's own anonymous report of a failed scheduled task.
+         *
+         * It reads "Scheduled command [] failed with exit code [1]." — the
+         * brackets empty because $event->command is the shell string and a
+         * closure or queued job has none. Every Schedule::call() and
+         * Schedule::job() in the application therefore fingerprints
+         * identically, at the same vendor line, into one group that cannot
+         * say which task broke.
+         *
+         * App\Listeners\RecordScheduledTaskFailure listens to the same
+         * event, reads the task's name, expression and exit code from it,
+         * and reports a ScheduledTaskFailure that says all of it. Both fire
+         * for one failure, so without this the screen would grow two groups
+         * per incident — the useful one and the one that wasted an
+         * afternoon.
+         *
+         * MATCHED ON THE MESSAGE ALONE, and that is not laziness.
+         *
+         * The first version of this also required `instanceof
+         * RuntimeException`, because that is what the framework looked like
+         * it built. It builds a plain \Exception, and RuntimeException
+         * EXTENDS Exception rather than the other way round — so the test
+         * was false every time and the filter did nothing while reading as
+         * though it worked. The group went on growing past six hundred
+         * events with this code in place.
+         *
+         * There is no class worth testing here: the exception is
+         * constructed inline by ScheduleRunCommand and has no identity of
+         * its own. The message is the only reliable signature, and it is
+         * specific enough that nothing else in the application can collide
+         * with it.
+         *
+         * A task that THROWS is untouched by this. Its real exception has
+         * its own message and still gets its own group, which is exactly
+         * what you want to read.
+         *
+         * If that listener is ever removed, remove this with it — otherwise
+         * scheduled tasks fail in silence, which is worse than failing
+         * anonymously.
+         */
+        if (preg_match('/^Scheduled command \[.*\] failed with exit code/', $e->getMessage()) === 1) {
+            return false;
+        }
+
         return true;
     }
 

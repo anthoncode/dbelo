@@ -140,7 +140,32 @@ Schedule::command('model:prune', ['--model' => [
 | A closure rather than a job: a job would need the queue worker to also be
 | alive, and then a stale stamp would have two possible causes instead of one.
 */
-Schedule::call(fn () => Cache::put(Diagnostics::SCHEDULER_STAMP, time(), now()->addDay()))
+/*
+| A BLOCK, NOT AN ARROW FUNCTION, AND THAT IS THE WHOLE POINT.
+|
+| This was `fn () => Cache::put(...)`, and an arrow function returns its
+| expression. Cache::put() returns a boolean, so the closure returned a
+| boolean — and CallbackEvent decides a scheduled task's fate like this:
+|
+|     $this->exitCode = $response === false ? 1 : 0;
+|
+| So whenever the cache store answered false, the scheduler recorded a
+| FAILED TASK with nothing thrown, nothing in laravel.log, and nothing that
+| reproduced when the same line was run by hand. It reported a failure every
+| five minutes for three weeks under a message that named no task at all.
+|
+| A body with no return gives null, and null === false is false. The stamp
+| still gets written; the store's opinion about the write simply stops being
+| read as a verdict on the task.
+|
+| THE GENERAL RULE, worth knowing before writing the next one of these: a
+| scheduled closure must not end on an expression whose value it does not
+| mean as a status. `fn () => $service->doThing()` is a trap whenever
+| doThing() can return false.
+*/
+Schedule::call(function () {
+    Cache::put(Diagnostics::SCHEDULER_STAMP, time(), now()->addDay());
+})
     ->everyFiveMinutes()
     ->name('diagnostics-heartbeat');
 
@@ -166,7 +191,23 @@ Schedule::call(fn () => Cache::put(Diagnostics::SCHEDULER_STAMP, time(), now()->
  * command, so getting the order wrong here does not break the scheduler,
  * it breaks `artisan`. Every command. Including migrate.
  */
-Schedule::call(fn () => app(SecurityWatch::class)->scan())
+/*
+ * A block for the same reason as the heartbeat above, even though this one
+ * is safe today.
+ *
+ * scan() returns an int, and `0 === false` is false under strict comparison,
+ * so a quiet hour does not currently register as a failed task. That is the
+ * kind of safety that holds until somebody changes a return type — and the
+ * failure it would produce is the one that just cost three weeks: a task
+ * reported as broken with nothing thrown and nothing in the log.
+ *
+ * The return value is dropped on purpose. If the number of signals raised
+ * ever needs reporting, it belongs in a log line inside scan(), not in a
+ * value the scheduler will read as a verdict.
+ */
+Schedule::call(function () {
+    app(SecurityWatch::class)->scan();
+})
     ->name('security-scan')
     ->hourly()
     ->withoutOverlapping();
