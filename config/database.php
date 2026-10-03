@@ -62,6 +62,30 @@ return [
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 Mysql::ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
+
+            /*
+             * Where mysqldump lives, for the backups.
+             *
+             * spatie/db-dumper shells out to `mysqldump`, and on this Mac
+             * that command is not on the PATH: DBngin keeps its binaries
+             * under its own folder and never adds them. The failure is
+             * exit code 127 — "command not found" — reported by the backup
+             * as "ran but produced no archive", which is the one message
+             * that does not name the cause.
+             *
+             * THE DIRECTORY, NOT THE BINARY. The dumper appends the
+             * executable's name itself, and a path ending in /mysqldump
+             * makes it look for /mysqldump/mysqldump.
+             *
+             * FROM THE ENVIRONMENT, and empty by default, because this is
+             * the most machine-specific value in the project: a path under
+             * /Users/Shared on a Mac, nothing at all on the Ubuntu server
+             * where apt puts mysqldump on the PATH. Hard-coding either one
+             * breaks the other, and the server is the one that matters.
+             */
+            'dump' => [
+                'dump_binary_path' => env('DB_DUMP_BINARY_PATH', ''),
+            ],
         ],
 
         'mariadb' => [
