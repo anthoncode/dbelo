@@ -123,137 +123,19 @@
          a push with no stack disappears without an error. It sits in the
          header, which is before Livewire's bundle at the foot of the body,
          so the alpine:init listener is registered before Alpine boots. --}}
-    <script>
-            /*
-             * Registered once for the whole panel.
-             *
-             * NO x-intersect, NO plugins. Alpine ships with Livewire and
-             * the plugin set is not ours to assume — a directive that is
-             * not registered fails SILENTLY, which this project has already
-             * paid for once.
-             */
-            document.addEventListener('alpine:init', () => {
-                Alpine.data('palette', (screens, endpoint) => ({
-                    open: false,
-                    q: '',
-                    loading: false,
-                    cursor: null,
-                    records: { sounds: [], users: [], posts: [] },
-                    timer: null,
-                    seq: 0,
 
-                    show() {
-                        this.open = true;
-                        this.$nextTick(() => this.$refs.input?.focus());
-                    },
+{{-- The Alpine component that drives this lives in resources/js/app.js.
 
-                    hide() {
-                        this.open = false;
-                        this.q = '';
-                        this.records = { sounds: [], users: [], posts: [] };
-                        this.cursor = null;
-                    },
+     It used to be a <script> right here, registering itself on
+     `alpine:init`. That works on a full page load and fails on every
+     wire:navigate: by then Alpine has long since started, the event never
+     fires again, and the component is never registered. The markup still
+     renders — so `x-show="open"` never applies, and this overlay, which is
+     `position: fixed; inset: 0`, sits open across the whole panel.
 
-                    /* Screens filter locally and instantly. */
-                    get screenRows() {
-                        const q = this.q.trim().toLowerCase();
-                        if (q.length < 1) return [];
+     x-cloak hid it the first time and not the second: Livewire restores the
+     cached DOM with the attribute already stripped by the earlier init.
 
-                        return screens
-                            .filter(s => (s.label + ' ' + s.group).toLowerCase().includes(q))
-                            .slice(0, 7)
-                            .map((s, i) => ({
-                                key: 'screen-' + i,
-                                label: s.label,
-                                meta: s.group,
-                                icon: s.icon,
-                                url: s.url,
-                            }));
-                    },
-
-                    get sections() {
-                        const wrap = (key, label, rows) => ({
-                            key, label,
-                            rows: rows.map((r, i) => ({ ...r, key: key + '-' + i })),
-                        });
-
-                        return [
-                            { key: 'screens', label: 'Go to', rows: this.screenRows },
-                            wrap('sounds', 'Sounds', this.records.sounds),
-                            wrap('users', 'People', this.records.users),
-                            wrap('posts', 'Content', this.records.posts),
-                        ];
-                    },
-
-                    get flat() {
-                        return this.sections.flatMap(s => s.rows);
-                    },
-
-                    run() {
-                        this.cursor = null;
-                        clearTimeout(this.timer);
-
-                        if (this.q.trim().length < 2) {
-                            this.records = { sounds: [], users: [], posts: [] };
-                            this.loading = false;
-                            return;
-                        }
-
-                        this.loading = true;
-
-                        // Debounced, and every response carries the sequence
-                        // it was asked with: without that check a slow reply
-                        // for "th" can land after a fast one for "thunder"
-                        // and overwrite the newer results with older ones.
-                        this.timer = setTimeout(() => {
-                            const mine = ++this.seq;
-
-                            fetch(endpoint + '?q=' + encodeURIComponent(this.q), {
-                                headers: { 'Accept': 'application/json' },
-                                credentials: 'same-origin',
-                            })
-                                .then(r => r.ok ? r.json() : Promise.reject(r.status))
-                                .then(data => {
-                                    if (mine !== this.seq) return;
-                                    this.records = data;
-                                    this.loading = false;
-                                })
-                                .catch(() => {
-                                    if (mine !== this.seq) return;
-                                    // Losing the records is survivable; the
-                                    // screens are already on the page.
-                                    this.records = { sounds: [], users: [], posts: [] };
-                                    this.loading = false;
-                                });
-                        }, 220);
-                    },
-
-                    move(step) {
-                        const rows = this.flat;
-                        if (! rows.length) return;
-
-                        const at = rows.findIndex(r => r.key === this.cursor);
-                        const next = at === -1
-                            ? (step > 0 ? 0 : rows.length - 1)
-                            : (at + step + rows.length) % rows.length;
-
-                        this.cursor = rows[next].key;
-
-                        this.$nextTick(() => {
-                            this.$refs.list
-                                ?.querySelector('[class*="bg-brand"]')
-                                ?.scrollIntoView({ block: 'nearest' });
-                        });
-                    },
-
-                    go() {
-                        const rows = this.flat;
-                        if (! rows.length) return;
-
-                        const row = rows.find(r => r.key === this.cursor) ?? rows[0];
-                        window.location.href = row.url;
-                    },
-                }));
-            });
-    </script>
+     In app.js the registration happens once, in the head, before Alpine
+     starts, and survives every navigation. --}}
 @endonce

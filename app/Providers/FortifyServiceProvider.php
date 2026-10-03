@@ -6,12 +6,14 @@ use App\Actions\Fortify\CreateNewUser;
 use App\Actions\Fortify\ResetUserPassword;
 use App\Actions\Fortify\UpdateUserPassword;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Laravel\Fortify\Contracts\LoginResponse;
+use Laravel\Fortify\Contracts\RegisterResponse;
 use Laravel\Fortify\Contracts\TwoFactorLoginResponse;
 use Laravel\Fortify\Fortify;
 
@@ -23,6 +25,45 @@ class FortifyServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->configureLoginRedirect();
+        $this->configureRegisterRedirect();
+    }
+
+    /**
+     * Straight from the form to "check your inbox".
+     *
+     * Fortify signs a new account in and sends it to config('fortify.home'),
+     * which is /library — an empty library, with nothing anywhere saying an
+     * email was just sent. The person then meets the verification screen
+     * days later, at the moment they try to download something, and has to
+     * go looking for a message they never knew existed.
+     *
+     * This is the whole point of verifying AT SIGN-UP: the inbox is open,
+     * the address was typed thirty seconds ago, and a typo in it is still
+     * fresh enough to be recognised. Ten minutes later it is a mystery.
+     *
+     * Only for an address that actually needs confirming. A Google sign-up
+     * arrives already verified, so it goes where it always went, and so
+     * does everybody else the day the feature is switched off.
+     */
+    private function configureRegisterRedirect(): void
+    {
+        $this->app->singleton(RegisterResponse::class, fn () => new class implements RegisterResponse
+        {
+            public function toResponse($request)
+            {
+                $user = $request->user();
+
+                $unverified = $user instanceof MustVerifyEmail && ! $user->hasVerifiedEmail();
+
+                if ($request->wantsJson()) {
+                    return new JsonResponse('', 201);
+                }
+
+                return $unverified
+                    ? redirect()->route('verification.notice')
+                    : redirect()->intended(config('fortify.home'));
+            }
+        });
     }
 
     /**

@@ -37,6 +37,26 @@ class AutoTags
     public const MINIMUM = 3;
 
     /**
+     * The ceiling for tags NOBODY TYPED: what the model proposed, plus
+     * whatever the filename and the category top it up with.
+     *
+     * Not a limit on tagging. A person can still add more by hand, up to
+     * Tag::MAX_PER_SOUND — this is a limit on guessing, and the two are
+     * different permissions.
+     *
+     * It lives here rather than inside SoundSuggester because two callers
+     * need it: the model's own answer is cut to this length, and so is the
+     * list after the top-up. With the number in one place a thin answer
+     * plus a generous top-up cannot quietly add up to nine.
+     *
+     * Five, because Tag::MAX_PER_SOUND already makes the argument in its
+     * own docblock: past a point the extra terms match everything and stop
+     * distinguishing anything, which makes the whole catalogue worse rather
+     * than that one sound better.
+     */
+    public const MAX_AUTOMATIC = 5;
+
+    /**
      * Words that are in almost every filename and mean nothing as a search
      * term. A tag that matches four hundred sounds is not a filter.
      */

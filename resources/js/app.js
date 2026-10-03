@@ -441,3 +441,160 @@ document.addEventListener('alpine:init', () => {
         },
     }))
 })
+
+
+/*
+ * ═══════════════════════════════════════════════════════════════════════
+ * THE ADMIN COMMAND PALETTE (⌘K)
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * Moved here out of the Blade component it draws, and the move IS the fix.
+ *
+ * Registering an Alpine component from a <script> inside the page body
+ * works exactly once: on a full load, that script runs before Livewire
+ * starts Alpine, so its `alpine:init` listener is in place when the event
+ * fires. Arrive at the same page through wire:navigate and Alpine is
+ * already running — `alpine:init` will never fire again, the component is
+ * never registered, and every binding on it silently does nothing.
+ *
+ * For this component "nothing" meant the overlay showing. It is
+ * position:fixed across the viewport and hidden only by `x-show="open"`;
+ * with no Alpine there is no x-show, and x-cloak had already been stripped
+ * by the first, working init and restored that way from Livewire's cache.
+ * So the admin opened with the search dialog covering it.
+ *
+ * app.js is loaded once, in the head, before Alpine starts, and is not
+ * re-executed by navigation — which is the only place this registration is
+ * safe. The same trap is still open in resources/js/converter.js.
+ */
+/*
+             * Registered once for the whole panel.
+             *
+             * NO x-intersect, NO plugins. Alpine ships with Livewire and
+             * the plugin set is not ours to assume — a directive that is
+             * not registered fails SILENTLY, which this project has already
+             * paid for once.
+             */
+            document.addEventListener('alpine:init', () => {
+                Alpine.data('palette', (screens, endpoint) => ({
+                    open: false,
+                    q: '',
+                    loading: false,
+                    cursor: null,
+                    records: { sounds: [], users: [], posts: [] },
+                    timer: null,
+                    seq: 0,
+
+                    show() {
+                        this.open = true;
+                        this.$nextTick(() => this.$refs.input?.focus());
+                    },
+
+                    hide() {
+                        this.open = false;
+                        this.q = '';
+                        this.records = { sounds: [], users: [], posts: [] };
+                        this.cursor = null;
+                    },
+
+                    /* Screens filter locally and instantly. */
+                    get screenRows() {
+                        const q = this.q.trim().toLowerCase();
+                        if (q.length < 1) return [];
+
+                        return screens
+                            .filter(s => (s.label + ' ' + s.group).toLowerCase().includes(q))
+                            .slice(0, 7)
+                            .map((s, i) => ({
+                                key: 'screen-' + i,
+                                label: s.label,
+                                meta: s.group,
+                                icon: s.icon,
+                                url: s.url,
+                            }));
+                    },
+
+                    get sections() {
+                        const wrap = (key, label, rows) => ({
+                            key, label,
+                            rows: rows.map((r, i) => ({ ...r, key: key + '-' + i })),
+                        });
+
+                        return [
+                            { key: 'screens', label: 'Go to', rows: this.screenRows },
+                            wrap('sounds', 'Sounds', this.records.sounds),
+                            wrap('users', 'People', this.records.users),
+                            wrap('posts', 'Content', this.records.posts),
+                        ];
+                    },
+
+                    get flat() {
+                        return this.sections.flatMap(s => s.rows);
+                    },
+
+                    run() {
+                        this.cursor = null;
+                        clearTimeout(this.timer);
+
+                        if (this.q.trim().length < 2) {
+                            this.records = { sounds: [], users: [], posts: [] };
+                            this.loading = false;
+                            return;
+                        }
+
+                        this.loading = true;
+
+                        // Debounced, and every response carries the sequence
+                        // it was asked with: without that check a slow reply
+                        // for "th" can land after a fast one for "thunder"
+                        // and overwrite the newer results with older ones.
+                        this.timer = setTimeout(() => {
+                            const mine = ++this.seq;
+
+                            fetch(endpoint + '?q=' + encodeURIComponent(this.q), {
+                                headers: { 'Accept': 'application/json' },
+                                credentials: 'same-origin',
+                            })
+                                .then(r => r.ok ? r.json() : Promise.reject(r.status))
+                                .then(data => {
+                                    if (mine !== this.seq) return;
+                                    this.records = data;
+                                    this.loading = false;
+                                })
+                                .catch(() => {
+                                    if (mine !== this.seq) return;
+                                    // Losing the records is survivable; the
+                                    // screens are already on the page.
+                                    this.records = { sounds: [], users: [], posts: [] };
+                                    this.loading = false;
+                                });
+                        }, 220);
+                    },
+
+                    move(step) {
+                        const rows = this.flat;
+                        if (! rows.length) return;
+
+                        const at = rows.findIndex(r => r.key === this.cursor);
+                        const next = at === -1
+                            ? (step > 0 ? 0 : rows.length - 1)
+                            : (at + step + rows.length) % rows.length;
+
+                        this.cursor = rows[next].key;
+
+                        this.$nextTick(() => {
+                            this.$refs.list
+                                ?.querySelector('[class*="bg-brand"]')
+                                ?.scrollIntoView({ block: 'nearest' });
+                        });
+                    },
+
+                    go() {
+                        const rows = this.flat;
+                        if (! rows.length) return;
+
+                        const row = rows.find(r => r.key === this.cursor) ?? rows[0];
+                        window.location.href = row.url;
+                    },
+                }));
+            });

@@ -186,6 +186,62 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
         return Plan::where('is_active', true)->orderBy('sort_order')->get();
     }
 
+    /**
+     * The ladder: free and everything that bills again.
+     *
+     * A one-off purchase is not a cheaper rung of the same ladder, and a
+     * grid is a comparison — four cards in a row invite the eye to read
+     * "$3 once" against "$9 / month" on one axis, where the cheapest wins
+     * and the recurring plans lose to something that is not competing with
+     * them. So the passes come out, and get a shape of their own below.
+     *
+     * Decided by Plan::isOneOff(), which is "costs money and never bills
+     * again" — not by position and not by slug. A week pass added next year
+     * lands in the right place without anybody remembering this rule.
+     */
+    #[Computed]
+    public function tiers()
+    {
+        return $this->plans->reject(fn (Plan $plan) => $plan->isOneOff())->values();
+    }
+
+    /**
+     * The plan this visitor is already on, if any.
+     *
+     * Used to stop the page offering somebody the thing they are already
+     * paying for — "Choose Pro" on the account that has Pro is the clearest
+     * possible sign that a page is not looking at who is reading it.
+     */
+    #[Computed]
+    public function currentPlanId(): ?int
+    {
+        return auth()->user()?->currentPlan()?->id;
+    }
+
+    /** Day pass and anything else bought once. */
+    #[Computed]
+    public function passes()
+    {
+        return $this->plans->filter(fn (Plan $plan) => $plan->isOneOff())->values();
+    }
+
+    /**
+     * The grid, sized by what is in it.
+     *
+     * Written out in full in every arm: Tailwind emits a class only if it
+     * saw the whole string in a source file at build time, so a computed
+     * "lg:grid-cols-{$n}" would exist at runtime and never in the CSS.
+     */
+    public function gridClass(): string
+    {
+        return match ($this->tiers->count()) {
+            1 => 'max-w-md mx-auto',
+            2 => 'sm:grid-cols-2 max-w-3xl mx-auto',
+            3 => 'sm:grid-cols-2 lg:grid-cols-3',
+            default => 'sm:grid-cols-2 lg:grid-cols-4',
+        };
+    }
+
     #[Computed]
     public function totals(): array
     {
@@ -460,7 +516,10 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
          PLANS
          ══════════════════════════════════════════════════════════════ --}}
     @if ($this->plans->isNotEmpty())
-        <section class="py-14">
+        {{-- id="plans" so /settings/plan can link straight here. Without it
+             "See the plans" lands at the top of the home page and the person
+             who came to compare has to go looking. --}}
+        <section id="plans" class="scroll-mt-24 py-14">
             <div class="rise text-center">
                 <div class="micro">Plans</div>
                 <h2 class="mt-2 text-[clamp(1.6rem,3.4vw,2.3rem)] font-semibold">
@@ -468,8 +527,8 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
                 </h2>
             </div>
 
-            <div class="mt-8 grid gap-4 lg:grid-cols-3">
-                @foreach ($this->plans as $i => $plan)
+            <div class="mt-8 grid gap-4 {{ $this->gridClass() }}">
+                @foreach ($this->tiers as $i => $plan)
                     @php($isPopular = $plan->is_popular ?? $loop->index === 1)
 
                     <div @class([
@@ -511,17 +570,117 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
                             @endforeach
                         </ul>
 
-                        <a href="{{ route('register') }}" wire:navigate
-                           @class([
-                               'mt-7 block rounded-full py-3 text-center text-[0.88rem] font-medium transition duration-300 ease-dbelo hover:-translate-y-0.5',
-                               'bg-brand text-white shadow-brand hover:shadow-brand-lg' => $isPopular,
-                               'bg-ink/[0.05] text-ink/70 hover:bg-ink/[0.09] dark:bg-paper/[0.08] dark:text-paper/70' => ! $isPopular,
-                           ])>
-                            {{ $plan->isFree() ? 'Start free' : 'Choose '.$plan->name }}
-                        </a>
+                        {{-- ── WHERE THE BUTTON GOES ────────────────────
+                             It went to /register for everybody, and Fortify
+                             puts `guest` on that route — so a signed-in
+                             visitor clicking "Choose Pro" was bounced
+                             straight back and the page appeared to do
+                             nothing at all.
+
+                             There is no checkout yet: PayPal is not
+                             connected and no purchase route exists. Rather
+                             than a button that pretends, each case gets the
+                             truest destination available today. --}}
+                        @if ($this->currentPlanId === $plan->id)
+                            {{-- Not a link. Offering somebody the plan they
+                                 are already on is the clearest sign a page
+                                 is not looking at who is reading it. --}}
+                            <div class="mt-7 flex items-center justify-center gap-2 rounded-full bg-success/12 py-3 text-center text-[0.88rem] font-medium text-success">
+                                <x-icon name="circle-check" style="solid" class="text-[0.78rem]" />
+                                Your plan
+                            </div>
+                        @else
+                            <a href="{{ auth()->check() ? route('plan.show') : route('register') }}" wire:navigate
+                               @class([
+                                   'mt-7 block rounded-full py-3 text-center text-[0.88rem] font-medium transition duration-300 ease-dbelo hover:-translate-y-0.5',
+                                   'bg-brand text-white shadow-brand hover:shadow-brand-lg' => $isPopular,
+                                   'bg-ink/[0.05] text-ink/70 hover:bg-ink/[0.09] dark:bg-paper/[0.08] dark:text-paper/70' => ! $isPopular,
+                               ])>
+                                @auth
+                                    Change plan
+                                @else
+                                    {{ $plan->isFree() ? 'Start free' : 'Choose '.$plan->name }}
+                                @endauth
+                            </a>
+                        @endif
                     </div>
                 @endforeach
             </div>
+
+            {{-- ══════════════════════════════════════════════════════════
+                 BOUGHT ONCE, NOT SUBSCRIBED
+
+                 A bar, not a fourth card, and visible rather than behind a
+                 button. Two reasons, and neither is the layout:
+
+                 · This is the cheapest way somebody pays you for the first
+                   time — the person who will not subscribe today. A product
+                   one click away is a product most visitors never see, and
+                   the one you least want hidden is the low-commitment one.
+
+                 · It is a different kind of purchase, not a cheaper tier.
+                   The shape says so before the words do: nobody compares a
+                   wide dark bar against three light cards on the same axis,
+                   which is exactly the comparison a fourth column invites
+                   and the one that makes "$3 once" beat "$9 a month".
+
+                 Full width on purpose. It reads as the floor under the
+                 ladder rather than a rung of it.
+                 ══════════════════════════════════════════════════════════ --}}
+            @foreach ($this->passes as $pass)
+                <div class="rise mt-4 overflow-hidden rounded-card bg-surface p-7 shadow-soft-lg ring-1 ring-brand/25 sm:p-8 dark:bg-surface-dark"
+                     style="animation-delay: {{ 60 * ($this->tiers->count() + $loop->index) }}ms"
+                     wire:key="pass-{{ $pass->id }}">
+
+                    <div class="relative flex flex-wrap items-center gap-x-8 gap-y-5">
+
+                        <div class="min-w-[14rem] flex-1">
+                            <div class="flex items-center gap-2.5">
+                                <x-icon name="ticket" style="solid" class="text-[0.85rem] text-brand" />
+                                <span class="micro">{{ $pass->name }}</span>
+                            </div>
+
+                            <p class="mt-2.5 max-w-[46ch] text-[0.95rem] leading-relaxed text-ink/65 dark:text-paper/65">
+                                {{ $pass->description ?: 'Everything a plan gives you, for a day. No account to cancel and nothing renews.' }}
+                            </p>
+
+                            @if (filled($pass->features ?? []))
+                                <ul class="mt-4 flex flex-wrap gap-x-5 gap-y-2">
+                                    @foreach ($pass->features as $feature)
+                                        <li class="flex items-center gap-2 text-[0.84rem] text-ink/60 dark:text-paper/60">
+                                            <x-icon name="check" style="solid" class="shrink-0 text-[0.68rem] text-success" />
+                                            {{ $feature }}
+                                        </li>
+                                    @endforeach
+                                </ul>
+                            @endif
+                        </div>
+
+                        <div class="flex flex-wrap items-center gap-6">
+                            <div class="flex items-baseline gap-1.5">
+                                <span class="text-[2.1rem] font-semibold tracking-[-0.03em]">{{ $pass->priceForHumans() }}</span>
+                                {{-- "once" rather than an interval. The whole
+                                     point of this box is that there is no
+                                     next payment, and the word that says so
+                                     belongs next to the number. --}}
+                                <span class="text-[0.85rem] text-ink/45 dark:text-paper/45">once</span>
+                            </div>
+
+                            @if ($this->currentPlanId === $pass->id)
+                                <div class="flex items-center gap-2 rounded-full bg-success/12 px-7 py-3 text-[0.88rem] font-medium text-success">
+                                    <x-icon name="circle-check" style="solid" class="text-[0.78rem]" />
+                                    Active now
+                                </div>
+                            @else
+                                <a href="{{ auth()->check() ? route('plan.show') : route('register') }}" wire:navigate
+                                   class="rounded-full bg-action px-7 py-3 text-[0.88rem] font-medium text-white transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:brightness-110">
+                                    Get the {{ $pass->name }}
+                                </a>
+                            @endif
+                        </div>
+                    </div>
+                </div>
+            @endforeach
         </section>
     @endif
 

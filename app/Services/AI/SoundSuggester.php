@@ -4,6 +4,7 @@ namespace App\Services\AI;
 
 use App\Models\Category;
 use App\Models\Sound;
+use App\Support\AutoTags;
 use App\Support\Suggestions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
@@ -44,18 +45,64 @@ class SoundSuggester
     public const CATEGORY_CONFIDENCE_FLOOR = 60;
 
     /**
-     * How long a description may be.
+     * How long the description may be.
      *
-     * 150 rather than Google's 160: the snippet is cut at a width, not at a
-     * character count, and a sentence that ends before the limit reads as
-     * finished where one that runs to it reads as truncated. The floor is
-     * there because forty characters is a label, not a description — but it
-     * is low enough that a genuinely simple sound is allowed a short answer
-     * instead of being padded to reach a number.
+     * ── WHY THESE NUMBERS GREW FROM 120–150 TO 200–320 ───────────────────
+     *
+     * The old pair sized this text for a SEARCH RESULT, and the text is not
+     * a search result — it is the paragraph a visitor reads on the page.
+     * One string was doing two jobs and was measured for the smaller one, so
+     * the reader got the short end of a trade nobody had decided to make.
+     *
+     * They are now separate. This is the paragraph; the snippet Google gets
+     * is derived from it by Serp::snippet(), cut at a sentence that fits the
+     * width of a result line. Two or three sentences fit comfortably under
+     * the detail block's own clamp of 445, so the page shows the whole thing
+     * without its "See more" ever appearing — the button stays for the
+     * descriptions a person writes by hand and makes longer.
+     *
+     * It also feeds the 63–70% of the time Google writes its own snippet
+     * anyway: it builds that from page content, and 135 characters is almost
+     * nothing to build from.
      */
-    private const DESCRIPTION_MIN = 120;
+    private const DESCRIPTION_MIN = 200;
 
-    private const DESCRIPTION_MAX = 150;
+    private const DESCRIPTION_MAX = 320;
+
+    /**
+     * Below this, the answer is thrown away instead of stored.
+     *
+     * ── WHY THE FLOOR MOVED FROM 40 TO 110 ───────────────────────────────
+     *
+     * DESCRIPTION_MIN is what the PROMPT asks for. It was never enforced:
+     * cleanDescription() only rejected answers under forty characters, so a
+     * model that came back with ninety-five was believed. The ceiling was
+     * real and the floor was a wish, and a limit applied on one side only
+     * produces exactly what that does — never too long, frequently short.
+     *
+     * A ninety-five character description fills two thirds of the result
+     * Google will print and leaves the rest empty. It is also the version
+     * nobody ever goes back to improve, because it looks finished.
+     *
+     * Kept at a tenth under DESCRIPTION_MIN when that pair moved to 200–320,
+     * so the model still has a little room under what it was asked for and a
+     * good paragraph is not binned over a handful of characters.
+     *
+     * A rejected description costs nothing else: the tags from the same
+     * answer are still written, the sound simply shows no suggestion to
+     * accept, and the per-sound "ask again" button on the moderation screen
+     * is right there.
+     */
+    private const DESCRIPTION_FLOOR = 180;
+
+    /*
+     * How many tags a MODEL may propose: AutoTags::MAX_AUTOMATIC.
+     *
+     * It was 14 here, which is where "some sounds have far too many" came
+     * from. The number is not repeated in this class on purpose — the same
+     * ceiling has to survive the top-up that happens after this answer
+     * comes back, and a second copy is a second thing to forget.
+     */
 
     public function __construct(private ?AiProvider $provider = null) {}
 
@@ -149,17 +196,51 @@ class SoundSuggester
            case, no punctuation, no duplicates. These are never displayed, so
            an ugly but likely word beats an elegant but unlikely one.
 
-        THE META DESCRIPTION, which is the part people read:
+        THE DESCRIPTION, which is the paragraph on the page people read:
 
-        6. Between {$min} and {$max} characters. Aim near the top of that
-           range: Google gives a result about 990 pixels of width, and a
-           description of 95 characters leaves a third of it empty — free
-           space nobody else can use. Going past {$max} risks the cut. One
-           sentence, or two short ones.
-        7. It has to answer two things: WHAT the sound is, and WHAT SOMEBODY
-           WOULD USE IT FOR — the kind of project, scene or moment it fits.
-           A description that only names the sound again has said nothing the
-           title did not.
+        6. WRITE EXACTLY THREE SENTENCES. Each one has a different job, and a
+           sentence that does another sentence's job is a wasted sentence:
+
+             FIRST  — WHAT the sound is and how it sounds. Its character:
+                      sharp, dull, warm, tense, hollow, bright.
+             SECOND — WHERE it gets used. The kind of scene, project or
+                      moment an editor would reach for it in.
+             THIRD  — ONE PRACTICAL FACT about the recording itself, taken
+                      from what you were given: whether it loops cleanly,
+                      whether it is a short hit or a long bed, whether it
+                      sits close or far, whether it is clean or has room on
+                      it. Not a repetition of the first sentence in other
+                      words.
+
+           Three sentences doing three jobs land between {$min} and {$max}
+           characters on their own. Do not count characters — count
+           sentences, and check there are three before you answer.
+
+        7. A WORKED EXAMPLE. Given "Wooden Door Close Interior.wav", 2
+           seconds, not loopable:
+
+           GOOD: "Wood meets frame in one dull, solid knock, with a short
+           tail of air behind it. It fits interiors where somebody leaves a
+           room — a kitchen, an office, the end of an argument. Close-miked
+           and dry, so it sits under dialogue without fighting it."
+
+           Note what the good one does NOT start with: "A ", "This ", "The
+           sound of". Rule 9 is not decoration.
+
+           BAD: "This is a high quality wooden door close sound effect.
+           Perfect for your video projects. Crystal clear 48kHz audio."
+
+           The bad one is banned three times over: it names the sound again
+           instead of describing it, it uses the phrases in rule 10, and its
+           third sentence is a spec sheet. The good one could only have been
+           written about this file.
+
+        7b. Everything in the third sentence must come from the facts you
+           were given or from what the filename plainly implies. "Close-
+           miked and dry" is fair for a clean interior recording; "recorded
+           in a 19th century farmhouse" is not. When you have nothing
+           practical to say, say something true about its shape — a single
+           hit, a slow swell, an even bed — rather than inventing.
         8. Write like a person, not a catalogue. You may name the character
            the sound HAS — tense, warm, gentle, urgent, playful, cold — when
            the filename already implies it. "Elegant logo" is elegant; say so.
@@ -173,7 +254,22 @@ class SoundSuggester
         10. Banned outright, because every stock library already overuses them
            and they say nothing: "perfect for", "ideal for", "high quality",
            "crystal clear", "professional", "royalty free", "this sound".
-           Never mention the file format, the bitrate or the duration.
+
+           NEVER WRITE A NUMBER OR A FORMAT. No "2 seconds", no "48 kHz", no
+           "MP3", no "stereo" as a spec. The page prints the real figures in
+           a table beside this text, so a number here is either a duplicate
+           or — the day the file is replaced — a lie that nobody thinks to
+           check.
+
+           The QUALITY those numbers describe is yours to use, and rule 6's
+           third sentence depends on it: "a short hit", "a long even bed",
+           "loops without a seam" say what an editor needs and cannot go
+           stale.
+
+        11. Plain and useful. You are not selling anything — whoever reads
+           this page has already found the sound. Describe it, place it, and
+           stop. No adjective that could be applied to any file in the
+           library has earned its place in this one.
 
         Write the tags and the description in English. search_terms_es is the
         one field in Spanish.
@@ -201,6 +297,30 @@ class SoundSuggester
             'Duration: '.($seconds > 0 ? $seconds.' seconds' : 'unknown'),
             'Type: '.($sound->type === 'music' ? 'music' : 'sound effect'),
         ];
+
+        /*
+         * The duration again, as a SHAPE rather than a number.
+         *
+         * Rule 6 asks the third sentence for a practical fact and rule 10
+         * forbids writing the figure, which leaves the model to turn
+         * "2 seconds" into a word on its own. It is bad at that boundary —
+         * four seconds reads as "short" to one answer and "sustained" to
+         * the next, so the same catalogue describes itself inconsistently.
+         *
+         * Deciding it here makes it one rule instead of a judgement call
+         * repeated a thousand times, and the thresholds are editable by
+         * somebody who can see all the sounds at once, which the model
+         * never can.
+         */
+        if ($seconds > 0) {
+            $lines[] = 'Shape: '.match (true) {
+                $seconds <= 2 => 'a single short hit',
+                $seconds <= 6 => 'a short sound with a tail',
+                $seconds <= 20 => 'a sustained sound',
+                $seconds <= 90 => 'a long bed',
+                default => 'a very long bed, for looping under a whole scene',
+            };
+        }
 
         if ($sound->is_loopable) {
             $lines[] = 'Loops seamlessly: yes';
@@ -257,7 +377,7 @@ class SoundSuggester
      * @param  mixed  $tags
      * @return array<int, string>
      */
-    private function cleanTags($tags, int $limit = 14): array
+    private function cleanTags($tags, int $limit = AutoTags::MAX_AUTOMATIC): array
     {
         if (! is_array($tags)) {
             return [];
@@ -306,9 +426,15 @@ class SoundSuggester
             return null;
         }
 
-        // Too short is a non-answer and is dropped, so the review screen
-        // shows nothing rather than something useless.
-        if (mb_strlen($clean) < 40) {
+        /*
+         * Too short is a non-answer and is dropped, so the review screen
+         * shows nothing rather than something useless.
+         *
+         * Enforced against DESCRIPTION_FLOOR, not against a number written
+         * here: the prompt and the filter have to agree, and they only stay
+         * agreed if there is one place to change.
+         */
+        if (mb_strlen($clean) < self::DESCRIPTION_FLOOR) {
             return null;
         }
 
@@ -344,8 +470,34 @@ class SoundSuggester
             }
         }
 
-        // Only when the sentence that survives is still worth reading.
-        if ($lastStop > 60) {
+        /*
+         * The sentence cut is taken ONLY when what survives is still a
+         * description.
+         *
+         * ── THIS IS WHAT MADE EVERY DESCRIPTION COME OUT AT ~110 ─────────
+         *
+         * Rule 6 of the prompt asks for "one sentence, or two short ones",
+         * and the model obliges: a 190-character answer whose first sentence
+         * ends around 110 and whose second runs past 150. The only ". "
+         * inside the 150-character window is therefore the one at 110 — and
+         * the old guard, `$lastStop > 60`, accepted it without ever asking
+         * how much was left.
+         *
+         * So two thirds of a perfectly good answer went in the bin, every
+         * time, and the result read as the model undershooting when it was
+         * this function doing the cutting. The ceiling was enforced twice
+         * and the floor not at all — the same asymmetry the FLOOR constant
+         * above was written to fix, surviving one layer further down.
+         *
+         * Measured against DESCRIPTION_FLOOR rather than a number of its
+         * own: it is already the answer to "long enough to be worth
+         * keeping", and a second opinion on that question is a second thing
+         * to forget. When the surviving sentence does not reach it, the
+         * word-boundary trim below keeps the full 150 instead — a little
+         * less elegant than ending on a full stop, and a description rather
+         * than a fragment.
+         */
+        if ($lastStop + 1 >= self::DESCRIPTION_FLOOR) {
             return rtrim(mb_substr($window, 0, $lastStop + 1));
         }
 

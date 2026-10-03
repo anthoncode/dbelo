@@ -128,6 +128,95 @@ class Serp
         return $fill < self::SHORT_AT ? 'short' : 'good';
     }
 
+    /**
+     * The snippet to emit for a page whose description was written for the
+     * page, not for Google.
+     *
+     * ── WHY THIS EXISTS ──────────────────────────────────────────────────
+     *
+     * A sound's description used to be sized for the search result: one
+     * sentence of about 150 characters, doing double duty as the paragraph
+     * a visitor reads. That is the wrong way round. The paragraph belongs to
+     * the reader, it is now two or three sentences long, and the snippet is
+     * derived from it here.
+     *
+     * ── WHY BY WIDTH, AND WHY A SENTENCE ─────────────────────────────────
+     *
+     * Str::limit() counts characters and appends "…", which produces a
+     * fragment that announces it was cut — the one thing a result should
+     * never look like. This cuts at the last sentence that still fits, so
+     * the snippet ends where a person would have ended it, and measures by
+     * WIDTH for the reason this whole class exists: Google cuts a line, not
+     * a character count.
+     *
+     * Falls back to a word boundary when the first sentence alone is already
+     * too wide, and never mid-word. The ellipsis is kept ONLY in that case,
+     * where the text really does continue mid-thought.
+     */
+    public static function snippet(string $text, float $units = self::DESCRIPTION_UNITS): string
+    {
+        $text = trim(preg_replace('/\s+/', ' ', $text));
+
+        if ($text === '' || self::width($text) <= $units) {
+            return $text;
+        }
+
+        /*
+         * Walked sentence by sentence rather than cut-then-search: the
+         * window a character-based cut would open is measured in the wrong
+         * unit, so a sentence that fits by width could fall outside it and
+         * be thrown away for nothing.
+         */
+        $kept = '';
+
+        foreach (preg_split('/(?<=[.!?])\s+/u', $text) as $sentence) {
+            $candidate = $kept === '' ? $sentence : $kept.' '.$sentence;
+
+            if (self::width($candidate) > $units) {
+                break;
+            }
+
+            $kept = $candidate;
+        }
+
+        /*
+         * A FINISHED SENTENCE IS ONLY BETTER WHILE IT STILL FILLS THE LINE.
+         *
+         * Sentences do not divide evenly into a result line. A paragraph of
+         * three — 99 characters, then 91, then 38 — fits the first and
+         * overflows on the second, so a rule of "whole sentences only" hands
+         * Google 99 characters and leaves a third of the result empty. That
+         * is the same waste SHORT_AT exists to warn about, arrived at
+         * politely.
+         *
+         * So the sentence cut is taken only when it fills the line as well
+         * as a trimmed phrase would. Below SHORT_AT it loses to the word
+         * cut, ellipsis and all: the tail is visibly unfinished, which is
+         * honest, and the words that fill the remaining third are words a
+         * reader can use.
+         */
+        if ($kept !== '' && self::fill($kept, 'description') >= self::SHORT_AT) {
+            return $kept;
+        }
+
+        // Trim whole words off the end until the text plus its ellipsis
+        // fits. Never mid-word: a cut word does not read as an editorial
+        // decision, it reads as a bug, in the first thing anybody sees.
+        $words = explode(' ', $text);
+
+        while (count($words) > 1 && self::width(implode(' ', $words).'…') > $units) {
+            array_pop($words);
+        }
+
+        $trimmed = rtrim(implode(' ', $words), " ,;:-–—").'…';
+
+        // Unless the sentence we already had is longer than what trimming
+        // achieved, in which case the ellipsis bought nothing.
+        return $kept !== '' && self::width($kept) >= self::width($trimmed)
+            ? $kept
+            : $trimmed;
+    }
+
     /** Width in units where a lowercase "n" is 1. */
     public static function width(string $text): float
     {

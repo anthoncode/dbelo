@@ -522,7 +522,67 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
     }
 }; ?>
 
+
 <div>
+    {{--
+        The neon that marks a machine-written field.
+
+        INLINE, not a Tailwind utility, and not app.css. Same reason the
+        converter page keeps its success pulse here: an animation that has
+        never been compiled does not exist in a stale stylesheet, and this one
+        has no fallback that reads as anything — it simply would not happen,
+        silently. This way `view:clear` is enough; no rebuild.
+
+        @property is what lets an ANGLE be animated. Without it a browser
+        cannot interpolate `from 0deg` to `from 360deg` inside a gradient, and
+        the border would sit still. Where it is unsupported that is exactly
+        what happens: a static brand-coloured edge, which still says "this came
+        from the model". Degrade, never break.
+    --}}
+    <style>
+        @property --dbelo-ai-angle {
+            syntax: '<angle>';
+            initial-value: 0deg;
+            inherits: false;
+        }
+
+        @keyframes dbelo-ai-turn {
+            to { --dbelo-ai-angle: 360deg; }
+        }
+
+        .ai-neon { position: relative; }
+
+        /* The border is a masked pseudo-element rather than a real border:
+           a conic gradient cannot be a border-color, and painting the ring
+           this way keeps the corner radius honest. */
+        .ai-neon::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            padding: 1.5px;
+            background: conic-gradient(
+                from var(--dbelo-ai-angle),
+                rgba(138, 67, 253, 0) 0deg 200deg,
+                rgba(138, 67, 253, 0.85) 285deg,
+                rgba(249, 81, 15, 0.95) 330deg,
+                rgba(138, 67, 253, 0) 360deg
+            );
+            -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            -webkit-mask-composite: xor;
+            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            mask-composite: exclude;
+            animation: dbelo-ai-turn 6s linear infinite;
+            pointer-events: none;
+        }
+
+        /* Asked for less motion: the ring stays, the travel stops. Somebody
+           who turned animation off still needs to see which field is a guess. */
+        @media (prefers-reduced-motion: reduce) {
+            .ai-neon::before { animation: none; }
+        }
+    </style>
+
     <div class="mx-auto max-w-5xl">
 
         <div class="mb-7">
@@ -670,6 +730,65 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
             @forelse ($this->sounds as $sound)
                 <div wire:key="mod-{{ $sound->id }}" class="rounded-card bg-surface p-6 shadow-soft-md dark:bg-surface-dark">
 
+                    {{-- ══════════════════════════════════════════════════
+                         WHAT THIS ONE NEEDS FROM YOU
+                         ══════════════════════════════════════════════════
+
+                         Everything these badges say was already on the card
+                         — in the counters at the top, in the box under the
+                         player, in the absence of tags on the right. It was
+                         just spread across three places, so answering "what
+                         does this row want" meant reading the whole card.
+
+                         They describe an ACTION OUTSTANDING, never a state.
+                         "In review" is not here: that is the tab you are
+                         already looking at, and a badge repeating the tab is
+                         a badge nobody reads after the first day.
+
+                         Each one is drawn only when it is true, so a row
+                         with nothing pending carries no badges at all — and
+                         a clean row should look clean. --}}
+                    @php
+                        $hasSuggestion = filled($sound->ai_suggestions);
+                        $neverAsked = $sound->ai_suggested_at === null;
+                        $noTags = $sound->tags->isEmpty();
+                    @endphp
+
+                    @if ($hasSuggestion || $neverAsked || $noTags)
+                        <div class="mb-4 flex flex-wrap items-center gap-2">
+
+                            {{-- The only one with something to accept. Brand
+                                 colour because it is the row's reason for
+                                 being on this screen. --}}
+                            @if ($hasSuggestion)
+                                <span class="inline-flex items-center gap-1.5 rounded-full bg-brand/12 px-2.5 py-1 text-[0.72rem] font-medium text-brand">
+                                    <x-icon name="wand-magic-sparkles" style="solid" class="text-[0.62rem]" />
+                                    Suggestion to review
+                                </span>
+                            @endif
+
+                            {{-- A sound with no tags is a sound the search
+                                 barely finds — the one real defect of the
+                                 three, so it is the one in warning. --}}
+                            @if ($noTags)
+                                <span class="inline-flex items-center gap-1.5 rounded-full bg-warning/15 px-2.5 py-1 text-[0.72rem] font-medium text-warning">
+                                    <x-icon name="tag" style="solid" class="text-[0.62rem]" />
+                                    No tags
+                                </span>
+                            @endif
+
+                            {{-- Muted on purpose: it is not a fault, it is a
+                                 thing that has not happened. Usually because
+                                 the key was missing when it was uploaded. --}}
+                            @if ($neverAsked)
+                                <span class="inline-flex items-center gap-1.5 rounded-full bg-ink/[0.06] px-2.5 py-1 text-[0.72rem] text-ink/45 dark:bg-paper/10 dark:text-paper/45">
+                                    <x-icon name="robot" style="regular" class="text-[0.62rem]" />
+                                    Never sent to the AI
+                                </span>
+                            @endif
+                        </div>
+                    @endif
+
                     <div class="mb-5 flex flex-wrap items-start justify-between gap-4">
                         <div class="micro">
                             by {{ $sound->user->name }} · {{ $sound->created_at->diffForHumans() }}
@@ -718,7 +837,26 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
                          with a source attached, not an answer.
                          ══════════════════════════════════════════════════ --}}
                     @if (filled($sound->ai_suggestions))
-                        <div class="mb-5 rounded-control bg-brand/[0.06] p-4">
+                        {{-- The ring goes round THIS box, not round the card.
+
+                             What the model wrote is a sentence, not a sound.
+                             A neon border on the whole card would label the
+                             upload as machine-made when a person recorded
+                             it, named it and is about to approve it — and it
+                             would fight the card's own job, which is the
+                             verdict at the bottom. Marking the field says
+                             the true thing in the place it is true. --}}
+                        <div class="ai-neon relative mb-5 mt-4 rounded-control bg-brand/[0.06] p-4 pt-5">
+
+                            {{-- The chip, sitting on the edge. Round, so it
+                                 reads as a stamp rather than another of the
+                                 pill-shaped labels this screen already uses
+                                 for tags and status. --}}
+                            <span class="absolute -top-3 left-4 grid size-8 place-items-center rounded-full bg-brand text-[0.66rem] font-bold tracking-[0.04em] text-white shadow-brand"
+                                  title="Written by the model, not by a person">
+                                AI
+                            </span>
+
                             <div class="mb-3 flex flex-wrap items-center gap-3">
                                 <label class="flex cursor-pointer items-center gap-2.5 text-[0.85rem]">
                                     <input type="checkbox" wire:model.live="selected.{{ $sound->id }}"

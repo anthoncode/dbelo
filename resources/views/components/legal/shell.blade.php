@@ -1,3 +1,30 @@
+{{--
+    ══════════════════════════════════════════════════════════════════════
+    THE LEGAL PAGE SHELL
+    ══════════════════════════════════════════════════════════════════════
+
+    ── WHY THIS FILE MOVED ──────────────────────────────────────────────
+
+    It was at resources/views/legal/shell.blade.php, and from there it did
+    not exist as far as Blade was concerned.
+
+    `<x-legal.shell>` is an ANONYMOUS COMPONENT, and Blade resolves that
+    name in exactly one place: resources/views/components/legal/shell.blade.php.
+    A file with @props and {{ $slot }} sitting anywhere else is just a view
+    — perfectly valid, and never found by that tag. So all four legal pages
+    answered with:
+
+        Unable to locate a class or view for component [legal.shell]
+
+    Broken since the day it was written, and invisible until something
+    linked to it. The pages themselves were always fine: the controller,
+    the routes, the text, the SEO titles. One folder was wrong.
+
+    The lesson is the same one the RSS feed taught a few days earlier: a
+    page nobody has opened is a page nobody has tested, and adding a link
+    is what finally runs it. Terms, Privacy, Licences and the Contributor
+    Agreement were all reachable only by typing their URL.
+--}}
 @props(['title', 'subtitle' => null])
 
 <x-layouts::site>

@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Sound;
+use App\Support\Serp;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
@@ -42,16 +43,35 @@ new #[Layout('layouts.site')] #[Title('Sound effect')] class extends Component {
         $sound = $this->sound;
         $preview = $sound->files->firstWhere('purpose', 'preview');
 
+        /*
+         * THE SNIPPET IS DERIVED, NOT STORED.
+         *
+         * The description is now a paragraph written for the page — two or
+         * three sentences, 200 to 320 characters. Serp::snippet() takes the
+         * sentences of it that fit the width of a result line, so Google
+         * gets a finished sentence instead of the first 155 characters with
+         * an ellipsis stuck on the end.
+         *
+         * Derived at render rather than written into meta_description when
+         * a suggestion is accepted, and that is deliberate: a stored copy
+         * goes stale the first time somebody edits the description and
+         * forgets the other field. meta_description stays what it has always
+         * been — the MANUAL OVERRIDE, for the handful of pages where the
+         * paragraph and the snippet really should say different things.
+         *
+         * The generated sentence underneath is unchanged: a sound with no
+         * description at all still gets a true, specific snippet rather than
+         * the site-wide default.
+         */
         $description = $sound->meta_description
-            ?: Str::limit(
+            ?: Serp::snippet(
                 $sound->description
                     ?: sprintf(
                         '%s — free %s sound effect, %s. Download in MP3 or WAV.',
                         $sound->title,
                         strtolower($sound->category?->name ?? 'audio'),
                         $sound->durationForHumans()
-                    ),
-                155
+                    )
             );
 
         $jsonld = [
@@ -184,10 +204,96 @@ new #[Layout('layouts.site')] #[Title('Sound effect')] class extends Component {
      * Counting characters on the server means the button can be rendered only
      * when there is genuinely something behind it.
      *
-     * 445 is roughly four lines at this width — enough for a real paragraph
-     * to be read whole, short enough that the Download button stays on screen.
+     * ── WHY THIS DROPPED FROM 445 TO 150 ─────────────────────────────────
+     *
+     * 445 was four lines, chosen when a description was one sentence of about
+     * 135 characters — so it never fired, and "See more" was a button that
+     * had never once appeared. The descriptions are 200 to 320 now, written
+     * as three sentences with a job each, and the whole paragraph was landing
+     * between the waveform and the Download button and pushing it off screen.
+     *
+     * 150 shows the first sentence and a little of the second: what the sound
+     * IS, which is the question somebody has while deciding whether to press
+     * play. Where it gets used and how it was recorded are worth reading and
+     * are not worth the button moving down for, so they go behind the fold.
      */
-    public const DETAILS_CLAMP = 445;
+    public const DETAILS_CLAMP = 150;
+
+    /**
+     * Never fold when only a few words would be hidden.
+     *
+     * A "See more" that reveals six words is a control that cost a click and
+     * returned nothing — the same broken promise as the one that opened
+     * nothing, just quieter. Below this much hidden text the paragraph is
+     * simply shown whole.
+     *
+     * 30 and not 60: at 60 the fold only started at 210 characters, which is
+     * above where most written descriptions land, so the common case went on
+     * showing the whole paragraph and the change did nothing where it was
+     * asked for. 30 folds anything past 180 — effectively every description
+     * the model writes — and still shows short hand-written ones whole.
+     */
+    private const DETAILS_WORTH_FOLDING = 30;
+
+    /**
+     * Which tabs this sound actually has, in order.
+     *
+     * ── WHY THIS IS COMPUTED AND NOT WRITTEN IN THE TEMPLATE ─────────────
+     *
+     * The tab strip used to skip empty tabs with @continue while $tab stayed
+     * on its default of 'similar'. A sound with no related sounds therefore
+     * rendered no button for the tab that was selected, and the panel below
+     * drew an empty list — a card with nothing in it and no way to tell why.
+     *
+     * Moving the licence in makes that worse rather than better: the licence
+     * is the one tab that is almost always there, so it would be the thing
+     * you could not reach. The list is built here, and `activeTab()` below falls
+     * back to the first entry, so the selected tab is always one that exists.
+     *
+     * @return array<string, array{0: string, 1: string, 2: ?int}>
+     */
+    #[Computed]
+    public function tabs(): array
+    {
+        $tabs = [];
+
+        if ($this->related->isNotEmpty()) {
+            $tabs['similar'] = ['Similar sounds', 'waveform-lines', $this->related->count()];
+        }
+
+        if ($this->packSounds->isNotEmpty()) {
+            $tabs['pack'] = ['In this pack', 'box-open', $this->packSounds->count()];
+        }
+
+        /*
+         * Last, and with no count.
+         *
+         * Last because the other two are what somebody came for — another
+         * sound — and this is the small print they check before leaving. No
+         * count because "License 1" is a number that answers no question;
+         * every other tab's number says how much is behind it.
+         */
+        if ($this->sound->license) {
+            $tabs['license'] = ['License', 'file-contract', null];
+        }
+
+        return $tabs;
+    }
+
+    /**
+     * The selected tab, guaranteed to be one that exists.
+     *
+     * $tab comes from the URL, so it can name a tab this sound does not have
+     * — an old link, a pack that was emptied, or simply the default landing
+     * on a sound with nothing similar. Resolving it here rather than trusting
+     * the property is what stops the page rendering an empty panel.
+     */
+    public function activeTab(): string
+    {
+        $tabs = $this->tabs;
+
+        return isset($tabs[$this->tab]) ? $this->tab : (string) array_key_first($tabs);
+    }
 
     /**
      * The description, in the two lengths the page needs.
@@ -203,18 +309,51 @@ new #[Layout('layouts.site')] #[Title('Sound effect')] class extends Component {
             return null;
         }
 
-        if (mb_strlen($full) <= self::DETAILS_CLAMP) {
+        if (mb_strlen($full) <= self::DETAILS_CLAMP + self::DETAILS_WORTH_FOLDING) {
             return ['full' => $full, 'short' => $full, 'truncated' => false];
         }
 
         return [
             'full' => $full,
-            // preserveWords, because a cut landing mid-word reads as a bug
-            // rather than as a fold — and the ellipsis has to look deliberate
-            // for "See more" to look like the answer to it.
-            'short' => Str::limit($full, self::DETAILS_CLAMP, '…', preserveWords: true),
+            'short' => $this->lead($full),
             'truncated' => true,
         ];
+    }
+
+    /**
+     * The part shown before the fold.
+     *
+     * Prefers to end on a full stop. The descriptions are written as three
+     * sentences, so a fold that lands on one of those joins reads as a
+     * paragraph that paused; a fold three words into the second sentence
+     * reads as a paragraph that was interrupted, and the ellipsis is the
+     * only thing distinguishing the two.
+     *
+     * The sentence has to be worth showing, hence the lower bound: a
+     * description opening with "Short, dry, close." would otherwise fold
+     * after three words and show almost nothing.
+     */
+    private function lead(string $full): string
+    {
+        $window = mb_substr($full, 0, self::DETAILS_CLAMP);
+        $stop = -1;
+
+        foreach (['. ', '! ', '? '] as $ending) {
+            $at = mb_strrpos($window, $ending);
+
+            if ($at !== false && $at > $stop) {
+                $stop = $at;
+            }
+        }
+
+        if ($stop + 1 >= self::DETAILS_CLAMP / 2) {
+            return rtrim(mb_substr($window, 0, $stop + 1));
+        }
+
+        // preserveWords, because a cut landing mid-word reads as a bug
+        // rather than as a fold — and the ellipsis has to look deliberate
+        // for "See more" to look like the answer to it.
+        return Str::limit($full, self::DETAILS_CLAMP, '…', preserveWords: true);
     }
 
     /**
@@ -429,17 +568,31 @@ new #[Layout('layouts.site')] #[Title('Sound effect')] class extends Component {
                          NOT x-cloak — a Livewire morph can only restore what
                          was rendered, and x-cloak would flash the whole
                          description open for a frame on any re-render. --}}
+                    {{-- The toggle sits INSIDE the paragraph, right after the
+                         ellipsis it answers, rather than on its own line
+                         below.
+
+                         On its own line it read as a separate control that
+                         happened to be nearby — the eye reached the "…",
+                         found nothing, and moved on to the spec row. Next to
+                         the dots it is the end of the sentence: the text
+                         stops, and the thing that continues it is the next
+                         word. Same for "See less", which belongs at the end
+                         of the full text for the same reason.
+
+                         One button per paragraph, not one shared button
+                         moving between them: each lives in the flow of the
+                         text it closes, and only one of the two paragraphs
+                         is ever on screen. --}}
                     <p class="mt-2 text-[0.95rem] leading-relaxed text-paper/70"
-                       x-show="! open">{{ $this->details['short'] }}</p>
+                       x-show="! open">{{ $this->details['short'] }}@if ($this->details['truncated'])<button
+                            type="button" x-on:click="open = true"
+                            class="ml-1.5 text-[0.85rem] text-brand underline underline-offset-4 transition hover:text-paper">See more</button>@endif</p>
 
                     <p class="mt-2 text-[0.95rem] leading-relaxed text-paper/70"
-                       x-show="open" style="display: none">{{ $this->details['full'] }}</p>
-
-                    @if ($this->details['truncated'])
-                        <button type="button" x-on:click="open = ! open"
-                                class="mt-2 text-[0.85rem] text-brand underline underline-offset-4 transition hover:text-paper"
-                                x-text="open ? 'See less' : 'See more'">See more</button>
-                    @endif
+                       x-show="open" style="display: none">{{ $this->details['full'] }}@if ($this->details['truncated'])<button
+                            type="button" x-on:click="open = false"
+                            class="ml-1.5 text-[0.85rem] text-brand underline underline-offset-4 transition hover:text-paper">See less</button>@endif</p>
                 </div>
             @endif
 
@@ -541,58 +694,6 @@ new #[Layout('layouts.site')] #[Title('Sound effect')] class extends Component {
     </div>
 
     {{-- ══════════════════════════════════════════════════════════════
-         LICENSE
-         ══════════════════════════════════════════════════════════════
-         Under the card, full width, and not in a column beside the
-         description. The two-column version only held together when there
-         WAS a description; on a sound without one the left half vanished and
-         the licence sat alone looking like a layout that had broken.
-
-         Full width also suits what it is: three permissions read once, side
-         by side, rather than a narrow column they have to stack in.
-         ══════════════════════════════════════════════════════════════ --}}
-    @if ($sound->license)
-        <div class="mt-8 rounded-card bg-surface p-7 shadow-soft-md dark:bg-surface-dark">
-            <div class="flex flex-wrap items-start gap-4">
-                <span class="grid size-11 shrink-0 place-items-center rounded-full bg-brand/10 text-brand">
-                    <x-icon name="file-contract" style="solid" class="text-[0.95rem]" />
-                </span>
-
-                <div class="min-w-0 flex-1">
-                    <div class="micro">License</div>
-                    <h2 class="mt-1 text-lg font-medium">{{ $sound->license->name }}</h2>
-                    <p class="mt-2 max-w-[80ch] text-[0.92rem] leading-relaxed text-ink/60 dark:text-paper/60">
-                        {{ $sound->license->summary }}
-                    </p>
-                </div>
-            </div>
-
-            {{-- Icon AND text, never colour alone: a permission a colour-blind
-                 visitor reads backwards is a legal problem, not a design one.
-
-                 Small on purpose. These are three facts read once and then
-                 recognised by shape; at button size they promise they do
-                 something when pressed. --}}
-            <div class="mt-5 flex flex-wrap gap-1.5">
-                @foreach ([
-                    ['Commercial use', $sound->license->allows_commercial],
-                    ['Credit required', $sound->license->requires_attribution],
-                    ['Modifications allowed', $sound->license->allows_derivatives],
-                ] as [$label, $allowed])
-                    <span @class([
-                        'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.72rem] shadow-soft-sm',
-                        'bg-success/10 text-success' => $allowed,
-                        'bg-ink/[0.04] text-ink/40 dark:bg-paper/[0.07] dark:text-paper/40' => ! $allowed,
-                    ])>
-                        <x-icon :name="$allowed ? 'circle-check' : 'circle-xmark'" style="solid" class="text-[0.65rem]" />
-                        {{ $label }}
-                    </span>
-                @endforeach
-            </div>
-        </div>
-    @endif
-
-    {{-- ══════════════════════════════════════════════════════════════
          ADVERTISING
          ══════════════════════════════════════════════════════════════
          Here, and not under the player, and the reason is worth writing
@@ -616,25 +717,39 @@ new #[Layout('layouts.site')] #[Title('Sound effect')] class extends Component {
     {{-- ══════════════════════════════════════════════════════════════
          MORE
          ══════════════════════════════════════════════════════════════ --}}
-    @if ($this->related->isNotEmpty() || $this->packSounds->isNotEmpty())
+    {{-- The licence is a TAB here now, not a panel of its own above.
+
+         It was a full-width card carrying three pills and one sentence, and
+         it sat between the player and the related sounds — prime space for
+         something a visitor glances at once. As a tab it costs a tab stop
+         and nothing else, and it is next to the two other things somebody
+         looks at after deciding they want the sound.
+
+         The guard now includes the licence. Without that, a sound with no
+         pack and nothing similar would render no section at all and the
+         licence would simply be gone from the page — which is how moving a
+         legal term into a tab turns from tidying into hiding. --}}
+    @if ($this->tabs !== [])
+        @php($current = $this->activeTab())
+
         <section class="mt-12">
 
             <div class="mb-5 flex flex-wrap items-center gap-1.5 border-b border-ink/[0.08] dark:border-paper/10">
-                @foreach ([
-                    'similar' => ['Similar sounds', 'waveform-lines', $this->related->count()],
-                    'pack' => ['In this pack', 'box-open', $this->packSounds->count()],
-                ] as $key => [$label, $icon, $count])
-                    @continue($count === 0)
-
+                @foreach ($this->tabs as $key => [$label, $icon, $count])
                     <button wire:click="$set('tab', '{{ $key }}')"
                             @class([
                                 'flex items-center gap-2 border-b-2 px-4 py-3 text-[0.9rem] transition duration-300 ease-dbelo -mb-px',
-                                'border-brand text-brand' => $tab === $key,
-                                'border-transparent text-ink/50 hover:text-ink dark:text-paper/50 dark:hover:text-paper' => $tab !== $key,
+                                'border-brand text-brand' => $current === $key,
+                                'border-transparent text-ink/50 hover:text-ink dark:text-paper/50 dark:hover:text-paper' => $current !== $key,
                             ])>
                         <x-icon :name="$icon" style="solid" class="text-[0.8rem]" />
                         {{ $label }}
-                        <span class="text-[0.75rem] opacity-50">{{ $count }}</span>
+
+                        {{-- Only where a number answers something. "License 1"
+                             is a count of nothing anybody asked about. --}}
+                        @if ($count !== null)
+                            <span class="text-[0.75rem] opacity-50">{{ $count }}</span>
+                        @endif
                     </button>
                 @endforeach
 
@@ -647,11 +762,68 @@ new #[Layout('layouts.site')] #[Title('Sound effect')] class extends Component {
                 @endif
             </div>
 
-            <div class="rounded-card bg-surface p-3 shadow-soft-md dark:bg-surface-dark">
-                @foreach (($tab === 'pack' ? $this->packSounds : $this->related) as $other)
-                    <x-sound-row :sound="$other" wire:key="{{ $tab }}-{{ $other->id }}" />
-                @endforeach
-            </div>
+            @if ($current === 'license')
+                {{-- p-7 and not p-3: the sound lists are rows that bring their
+                     own padding, this is prose and needs its own. --}}
+                <div class="rounded-card bg-surface p-7 shadow-soft-md dark:bg-surface-dark">
+                    <div class="flex flex-wrap items-center gap-x-4 gap-y-3">
+                        <span class="grid size-11 shrink-0 place-items-center rounded-full bg-brand/10 text-brand">
+                            <x-icon name="file-contract" style="solid" class="text-[0.95rem]" />
+                        </span>
+
+                        <div class="min-w-0">
+                            <h2 class="text-lg font-medium">{{ $sound->license->name }}</h2>
+                            @if ($sound->license->version)
+                                <div class="micro mt-0.5">Version {{ $sound->license->version }}</div>
+                            @endif
+                        </div>
+
+                        {{-- Icon AND text, never colour alone: a permission a
+                             colour-blind visitor reads backwards is a legal
+                             problem, not a design one.
+
+                             No longer folded behind anything. The tab is
+                             already the fold — hiding them a second time
+                             inside it would mean two clicks to learn whether
+                             you may sell the thing you are downloading. --}}
+                        <div class="flex flex-wrap gap-1.5 sm:ml-auto">
+                            @foreach ([
+                                ['Commercial use', $sound->license->allows_commercial],
+                                ['Credit required', $sound->license->requires_attribution],
+                                ['Modifications allowed', $sound->license->allows_derivatives],
+                            ] as [$label, $allowed])
+                                <span @class([
+                                    'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.72rem] shadow-soft-sm',
+                                    'bg-success/10 text-success' => $allowed,
+                                    'bg-ink/[0.04] text-ink/40 dark:bg-paper/[0.07] dark:text-paper/40' => ! $allowed,
+                                ])>
+                                    <x-icon :name="$allowed ? 'circle-check' : 'circle-xmark'" style="solid" class="text-[0.65rem]" />
+                                    {{ $label }}
+                                </span>
+                            @endforeach
+                        </div>
+                    </div>
+
+                    @if (filled($sound->license->summary))
+                        <p class="mt-5 max-w-[80ch] text-[0.92rem] leading-relaxed text-ink/60 dark:text-paper/60">
+                            {{ $sound->license->summary }}
+                        </p>
+                    @endif
+
+                    <a href="{{ $sound->license->url ?: route('legal.licenses') }}"
+                       @if ($sound->license->url) target="_blank" rel="noopener noreferrer" @else wire:navigate @endif
+                       class="mt-4 inline-flex items-center gap-2 text-[0.85rem] text-brand underline underline-offset-4 transition hover:text-ink dark:hover:text-paper">
+                        Read the full licence
+                        <x-icon name="arrow-up-right" style="solid" class="text-[0.7rem]" />
+                    </a>
+                </div>
+            @else
+                <div class="rounded-card bg-surface p-3 shadow-soft-md dark:bg-surface-dark">
+                    @foreach (($current === 'pack' ? $this->packSounds : $this->related) as $other)
+                        <x-sound-row :sound="$other" wire:key="{{ $current }}-{{ $other->id }}" />
+                    @endforeach
+                </div>
+            @endif
         </section>
     @endif
 </div>

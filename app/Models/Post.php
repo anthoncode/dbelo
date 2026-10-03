@@ -39,6 +39,7 @@ class Post extends Model
             'autosaved_at' => 'datetime',
             'noindex' => 'boolean',
             'in_footer' => 'boolean',
+            'is_system' => 'boolean',
         ];
     }
 

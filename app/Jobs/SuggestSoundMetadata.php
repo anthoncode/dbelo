@@ -165,6 +165,16 @@ class SuggestSoundMetadata implements ShouldQueue
             $names = array_merge($names, AutoTags::forSound($sound));
         }
 
+        /*
+         * The ceiling applies to the TOTAL, not just to the model's share.
+         *
+         * Two tags from a thin answer plus six from the filename is eight,
+         * and the cap on the answer alone would never have seen them. This
+         * is the line that makes "at most five automatic tags" true rather
+         * than intended.
+         */
+        $names = array_slice($names, 0, AutoTags::MAX_AUTOMATIC);
+
         $added = AutoTags::attach($sound, $names);
 
         Log::info('Sound suggestions stored', [

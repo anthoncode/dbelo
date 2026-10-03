@@ -102,6 +102,20 @@ new #[Layout('layouts.admin')] #[Title('Content')] class extends Component {
     public function trash(int $id): void
     {
         $post = Post::findOrFail($id);
+
+        /*
+         * The site needs Terms, Privacy and the Contributor Agreement: the
+         * footer links them, the sitemap lists them, and each one links to
+         * the others. The button is not drawn for these, and this is the
+         * rule behind the button — a hidden control is a control anybody
+         * can still call.
+         */
+        if ($post->is_system) {
+            session()->flash('error', "“{$post->title}” is a page the site needs. It can be edited, not deleted.");
+
+            return;
+        }
+
         $post->delete();
 
         ActivityLog::record('post.deleted', $post, ucfirst($this->type).": {$post->title} deleted");
@@ -119,6 +133,9 @@ new #[Layout('layouts.admin')] #[Title('Content')] class extends Component {
         $copy->slug = Post::uniqueSlug($post->title.' copy', $post->type);
         $copy->status = Post::STATUS_DRAFT;
         $copy->published_at = null;
+        // Copying the flag would make a second undeletable page out of one
+        // click, and the copy is not the one anything links to.
+        $copy->is_system = false;
         $copy->save();
 
         $copy->tags()->sync($post->tags->pluck('id'));
@@ -323,10 +340,20 @@ new #[Layout('layouts.admin')] #[Title('Content')] class extends Component {
 
                                 <x-admin.icon-button icon="copy" label="Duplicate" wire:click="duplicate({{ $post->id }})" />
 
-                                <x-admin.icon-button icon="trash" label="Delete"
-                                                     class="hover:!bg-danger/15 hover:!text-danger"
-                                                     wire:click="trash({{ $post->id }})"
-                                                     wire:confirm="Delete “{{ $post->title }}”?" />
+                                @if ($post->is_system)
+                                    <span class="group/tip relative grid size-9 place-items-center text-paper/20"
+                                          aria-label="This page cannot be deleted">
+                                        <x-icon name="lock" style="solid" class="text-[0.78rem]" />
+                                        <span class="pointer-events-none absolute bottom-full right-0 z-50 mb-2 whitespace-nowrap rounded-lg bg-paper px-2.5 py-1 text-[0.7rem] font-medium text-ink opacity-0 shadow-xl transition group-hover/tip:opacity-100">
+                                            The site needs this one
+                                        </span>
+                                    </span>
+                                @else
+                                    <x-admin.icon-button icon="trash" label="Delete"
+                                                         class="hover:!bg-danger/15 hover:!text-danger"
+                                                         wire:click="trash({{ $post->id }})"
+                                                         wire:confirm="Delete “{{ $post->title }}”?" />
+                                @endif
                             </div>
                         </td>
                     </tr>

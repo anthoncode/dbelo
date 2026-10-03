@@ -5,7 +5,10 @@ use App\Models\ActivityLog;
 use App\Models\Category;
 use App\Models\Collection as Pack;
 use App\Models\Sound;
+use App\Models\SoundFile;
 use App\Models\Tag;
+use App\Support\AdminNav;
+use App\Support\AutoTags;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
@@ -32,6 +35,19 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
     #[Url(except: '')] public string $pack = '';
     #[Url(except: '')] public string $type = '';
     #[Url(except: 'recent')] public string $sort = 'recent';
+
+    /*
+     * What is NOT filled in — the only filter here that asks about absence.
+     *
+     * Every other filter narrows by a value a sound has. This one narrows by
+     * a value it does not, which is the question you actually arrive with:
+     * the row already says "No description" when there is none, but finding
+     * those rows meant paging through the whole catalogue reading a column.
+     *
+     * It is a URL property so the bell can link straight here. See the
+     * $params map in App\Support\Notices.
+     */
+    #[Url(except: '')] public string $missing = '';
 
     /** @var array<int, int> */
     public array $selected = [];
@@ -79,7 +95,7 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
      */
     public function updated(string $property): void
     {
-        if (in_array($property, ['status', 'search', 'category', 'pack', 'type', 'sort'], true)) {
+        if (in_array($property, ['status', 'search', 'category', 'pack', 'type', 'sort', 'missing'], true)) {
             $this->resetPage();
             $this->selected = [];
         }
@@ -120,6 +136,34 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
             ->when($this->category !== '' && $this->category !== 'none',
                 fn ($q) => $q->where('category_id', $this->category))
             ->when($this->type, fn ($q, $t) => $q->where('type', $t))
+            /*
+            | ── WHAT IS MISSING ────────────────────────────────────────────
+            |
+            | Both spellings of empty, and they are not the same row: NULL is
+            | a sound nobody ever opened, '' is one somebody opened, cleared
+            | and saved. whereNull() alone silently under-reports the second
+            | kind, and under-reporting is worse than not reporting — it says
+            | the backlog is smaller than it is.
+            |
+            | Wrapped in its own closure so the OR cannot leak out and
+            | dissolve the status, category and search clauses around it.
+            | Without the wrapper, "published AND (null OR '')" becomes
+            | "published AND null OR ''" and the filter starts returning
+            | drafts.
+            */
+            ->when($this->missing === 'description', fn ($q) => $q
+                ->where(fn ($w) => $w->whereNull('description')->orWhere('description', '')))
+            /*
+            | Fewer tags than AutoTags::MINIMUM, which is the number below
+            | which a sound is effectively unfindable: tags are what the
+            | search engine matches on beyond the title.
+            |
+            | has('tags', '<', n) and not doesntHave('tags'): a sound with one
+            | tag is not tagged, it is started. Counting only the zero case
+            | would call that one finished.
+            */
+            ->when($this->missing === 'tags', fn ($q) => $q
+                ->has('tags', '<', AutoTags::MINIMUM))
             ->when($this->search, fn ($q, $s) => $q->where(fn ($w) => $w
                 ->where('title', 'like', "%{$s}%")
                 ->orWhere('slug', 'like', "%{$s}%")))
@@ -157,6 +201,36 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
             'rejected' => (int) ($byStatus['rejected'] ?? 0),
             'claimed' => (int) ($byStatus['claimed'] ?? 0),
             'trashed' => Sound::onlyTrashed()->count(),
+        ];
+    }
+
+    /**
+     * How much is unfinished, for the labels on the Missing filter.
+     *
+     * Read from AdminNav::counts() rather than counted again here, and that
+     * is the whole point: the bell links to this screen with a number in the
+     * sentence, and the screen it lands on has to show the same number. Two
+     * independent counts of the same thing is how "124 sounds have no
+     * description" lands on a filter that says 118 and neither is believed
+     * again.
+     *
+     * AdminNav::counts() is cached for a minute and already read once per
+     * admin render for the sidebar, so this costs nothing.
+     *
+     * Both numbers count PUBLISHED sounds only — the filter itself does not,
+     * because combining it with the Drafts tab is a reasonable thing to want.
+     * That is why the labels below say "published".
+     *
+     * @return array{description: int, tags: int}
+     */
+    #[Computed]
+    public function gaps(): array
+    {
+        $counts = AdminNav::counts();
+
+        return [
+            'description' => (int) ($counts['undescribed'] ?? 0),
+            'tags' => (int) ($counts['untagged'] ?? 0),
         ];
     }
 
@@ -405,6 +479,137 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
     }
 
     // ---------------------------------------------------------------
+    // Emptying the trash
+    //
+    // Sounds are NOT pruned. Sound uses SoftDeletes and not Prunable, and
+    // claude/retencion-de-datos.md lists no rule for them — on purpose:
+    // moving a sound to the trash says "this does not go on the site", not
+    // "destroy the master", and a job running at 03:50 with nobody watching
+    // must not make the second decision on the operator's behalf.
+    //
+    // The consequence is that the trash only grows, and every row in it is
+    // still holding its WAV. Emptying it was a per-row button, so a lot of
+    // forty was forty clicks and the disk stayed full until somebody did
+    // them all.
+    //
+    // WHAT MAKES THIS SAFE ENOUGH TO EXIST: it reports before it offers,
+    // the numbers are counted rather than estimated, and the button cannot
+    // be pressed by accident — the word DELETE has to be typed. It is the
+    // only action in the panel that cannot be undone, and it is the only
+    // one that asks you to type something.
+    // ---------------------------------------------------------------
+
+    /** Anything trashed longer ago than this is offered separately. */
+    public const TRASH_OLD_DAYS = 30;
+
+    /** Which confirmation is open: '' (none), 'old' or 'all'. */
+    public string $emptying = '';
+
+    /** What was typed into it. Must read DELETE, exactly. */
+    public string $emptyConfirm = '';
+
+    /**
+     * What is in the trash, counted — never estimated.
+     *
+     * A warning that says "about 1 GB" is a warning nobody can check, and
+     * this is the one screen where the number is the whole argument for
+     * trusting the button. size_bytes is a real column on sound_files, so
+     * the sum is exact rather than a guess from the durations.
+     *
+     * @return array{count: int, bytes: int, old: int, oldBytes: int}
+     */
+    #[Computed]
+    public function trashReport(): array
+    {
+        $cutoff = now()->subDays(self::TRASH_OLD_DAYS);
+
+        $bytesFor = fn ($q) => (int) SoundFile::whereIn('sound_id', $q->select('id'))->sum('size_bytes');
+
+        return [
+            'count' => Sound::onlyTrashed()->count(),
+            'bytes' => $bytesFor(Sound::onlyTrashed()),
+            'old' => Sound::onlyTrashed()->where('deleted_at', '<', $cutoff)->count(),
+            'oldBytes' => $bytesFor(Sound::onlyTrashed()->where('deleted_at', '<', $cutoff)),
+        ];
+    }
+
+    public function startEmpty(string $scope): void
+    {
+        $this->emptying = in_array($scope, ['old', 'all'], true) ? $scope : '';
+        $this->emptyConfirm = '';
+    }
+
+    public function cancelEmpty(): void
+    {
+        $this->emptying = '';
+        $this->emptyConfirm = '';
+    }
+
+    /**
+     * Destroy what the open confirmation covers.
+     *
+     * forceDelete() ONE MODEL AT A TIME, never a mass delete, because the
+     * Sound model's deleting hook is what removes the audio from disk and a
+     * query-builder delete does not fire it. Doing this the fast way would
+     * free the database and leave every master exactly where it was — the
+     * precise failure this button exists to fix, achieved invisibly.
+     *
+     * Chunked so a trash of two thousand does not load two thousand models
+     * with their files into memory at once.
+     */
+    public function emptyTrash(): void
+    {
+        abort_unless(auth()->user()?->isAdmin(), 403);
+
+        if ($this->emptying === '' || strtoupper(trim($this->emptyConfirm)) !== 'DELETE') {
+            return;
+        }
+
+        // Re-counted here rather than read from the computed property: the
+        // report was rendered before the typing started, and between then
+        // and now another admin may have restored something. The message
+        // has to describe what this call actually destroyed.
+        $query = Sound::onlyTrashed()
+            ->when($this->emptying === 'old',
+                fn ($q) => $q->where('deleted_at', '<', now()->subDays(self::TRASH_OLD_DAYS)));
+
+        $destroyed = 0;
+        $freed = 0;
+
+        $query->with('files')->chunkById(50, function ($sounds) use (&$destroyed, &$freed) {
+            foreach ($sounds as $sound) {
+                $freed += (int) $sound->files->sum('size_bytes');
+                $sound->forceDelete();
+                $destroyed++;
+            }
+        });
+
+        ActivityLog::record(
+            'sounds.trash_emptied',
+            null,
+            "{$destroyed} sound(s), ".$this->humanBytes($freed).' freed'
+        );
+
+        $this->cancelEmpty();
+        $this->refresh();
+
+        session()->flash('ok', $destroyed === 0
+            ? 'The trash was already empty.'
+            : "{$destroyed} sound(s) destroyed. ".$this->humanBytes($freed).' freed.');
+    }
+
+    /** Bytes as something a person can judge. Shared by the panel and the log. */
+    public function humanBytes(int $bytes): string
+    {
+        return match (true) {
+            $bytes >= 1_073_741_824 => number_format($bytes / 1_073_741_824, 1).' GB',
+            $bytes >= 1_048_576 => number_format($bytes / 1_048_576, 0).' MB',
+            $bytes > 0 => number_format($bytes / 1024, 0).' KB',
+            default => 'no files',
+        };
+    }
+
+    // ---------------------------------------------------------------
     // Many at once
     // ---------------------------------------------------------------
 
@@ -450,7 +655,16 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
 
     protected function refresh(): void
     {
-        unset($this->sounds, $this->counts);
+        /*
+         * `gaps` goes with them.
+         *
+         * It is memoised for the request like any computed, so without this
+         * line writing a description would move the row out of the filtered
+         * list while the label beside it still said the old number — the one
+         * contradiction this screen exists to avoid. Forgetting the cache
+         * below is not enough on its own: the computed never asks again.
+         */
+        unset($this->sounds, $this->counts, $this->gaps, $this->trashReport);
         cache()->forget('admin.nav.counts');
     }
 }; ?>
@@ -577,6 +791,36 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
             <option value="music">Music</option>
         </select>
 
+        {{-- ── WHAT IS MISSING ──────────────────────────────────────────
+             The only filter here that asks about absence, and the one the
+             bell links to. Ringed in amber while it is on, because unlike
+             every other filter this one hides most of the catalogue — and a
+             filter you forgot you left on reads as "the catalogue is nearly
+             empty", which is a bad ten minutes.
+
+             The counts are in the labels so the size of the job is visible
+             BEFORE selecting it. "No description (124)" answers the question;
+             selecting it and counting rows across thirteen pages does not.
+
+             They say "published" because that is what is counted. The filter
+             itself respects whichever tab is open, so it composes with Drafts
+             — the number just stops matching, which is correct and is why the
+             word is there. --}}
+        <select wire:model.live="missing"
+                @class([
+                    'rounded-lg border-0 px-3 py-2.5 text-[0.83rem] text-paper focus:outline-none focus:ring-2 focus:ring-brand/40',
+                    'bg-raised' => $missing === '',
+                    'bg-warning/15 ring-1 ring-warning/40' => $missing !== '',
+                ])>
+            <option value="">Complete & incomplete</option>
+            <option value="description">
+                No description{{ $this->gaps['description'] ? ' ('.number_format($this->gaps['description']).' published)' : '' }}
+            </option>
+            <option value="tags">
+                Under {{ AutoTags::MINIMUM }} tags{{ $this->gaps['tags'] ? ' ('.number_format($this->gaps['tags']).' published)' : '' }}
+            </option>
+        </select>
+
         <select wire:model.live="sort"
                 class="rounded-lg border-0 bg-raised px-3 py-2.5 text-[0.83rem] text-paper focus:outline-none focus:ring-2 focus:ring-brand/40">
             <option value="recent">Newest</option>
@@ -586,6 +830,106 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
             <option value="title">A–Z</option>
         </select>
     </div>
+
+    {{-- ══════ THE TRASH REPORT ══════════════════════════════════════════
+         Only on the Trash tab, because it is the only tab where it is true.
+
+         It is a REPORT first and a control second, and in that order on
+         purpose: the numbers are counted from size_bytes, not estimated, and
+         they are the entire reason anybody should trust the button under
+         them. "About a gigabyte" is a figure nobody can check.
+
+         The two scopes exist because they answer different fears. Emptying
+         what has sat here for a month is housekeeping. Emptying everything
+         includes what you deleted twenty minutes ago, which is the one you
+         regret. --}}
+    @if ($status === 'trashed' && $this->trashReport['count'] > 0)
+        <div class="mb-5 rounded-2xl border border-hairline bg-panel px-5 py-4">
+            <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
+                <div class="flex items-center gap-3">
+                    <span class="grid size-9 place-items-center rounded-full bg-warning/15 text-warning">
+                        <x-icon name="trash" style="solid" class="text-[12px]" />
+                    </span>
+                    <div>
+                        <div class="text-[0.9rem]">
+                            {{ number_format($this->trashReport['count']) }} sound(s) in the trash
+                        </div>
+                        <div class="text-[0.78rem] text-paper/40">
+                            Holding {{ $this->humanBytes($this->trashReport['bytes']) }} that nothing points at.
+                            They are never deleted automatically.
+                        </div>
+                    </div>
+                </div>
+
+                @if ($emptying === '')
+                    <div class="ml-auto flex flex-wrap items-center gap-2.5">
+                        @if ($this->trashReport['old'] > 0)
+                            <button wire:click="startEmpty('old')"
+                                    class="rounded-lg bg-raised px-4 py-2 text-[0.82rem] text-paper/70 transition hover:text-paper">
+                                Empty what is over {{ $this::TRASH_OLD_DAYS }} days
+                                <span class="ml-1 text-paper/35">
+                                    ({{ number_format($this->trashReport['old']) }} · {{ $this->humanBytes($this->trashReport['oldBytes']) }})
+                                </span>
+                            </button>
+                        @endif
+
+                        <button wire:click="startEmpty('all')"
+                                class="rounded-lg px-4 py-2 text-[0.82rem] text-danger/80 transition hover:bg-danger/10 hover:text-danger">
+                            Empty everything
+                        </button>
+                    </div>
+                @endif
+            </div>
+
+            {{-- ── THE CONFIRMATION ──────────────────────────────────────
+                 Typed, not clicked. Every other destructive control here
+                 uses wire:confirm, which is one keystroke away from done;
+                 this is the only action in the panel that cannot be undone
+                 and the only one that destroys files, so it is the only one
+                 that asks you to write something.
+
+                 The sentence above the field names the real count and the
+                 real size for THIS scope. A confirmation that says "are you
+                 sure?" has told you nothing you did not already know. --}}
+            @if ($emptying !== '')
+                @php
+                    $scopeCount = $emptying === 'old' ? $this->trashReport['old'] : $this->trashReport['count'];
+                    $scopeBytes = $emptying === 'old' ? $this->trashReport['oldBytes'] : $this->trashReport['bytes'];
+                @endphp
+
+                <div class="mt-4 rounded-xl border border-danger/30 bg-danger/[0.07] px-4 py-3.5">
+                    <p class="text-[0.86rem] leading-relaxed">
+                        This destroys <strong>{{ number_format($scopeCount) }} sound(s)</strong>
+                        and <strong>{{ $this->humanBytes($scopeBytes) }}</strong> of audio files, permanently.
+                        @if ($emptying === 'all' && $this->trashReport['old'] < $this->trashReport['count'])
+                            That includes
+                            {{ number_format($this->trashReport['count'] - $this->trashReport['old']) }}
+                            deleted in the last {{ $this::TRASH_OLD_DAYS }} days.
+                        @endif
+                        There is no undo and no backup of these files.
+                    </p>
+
+                    <div class="mt-3 flex flex-wrap items-center gap-2.5">
+                        <input type="text" wire:model.live="emptyConfirm" placeholder="Type DELETE"
+                               autocomplete="off" spellcheck="false"
+                               class="w-44 rounded-lg border-0 bg-raised px-3.5 py-2 text-[0.85rem] text-paper placeholder:text-paper/30 focus:outline-none focus:ring-2 focus:ring-danger/40" />
+
+                        <button wire:click="emptyTrash" wire:loading.attr="disabled" wire:target="emptyTrash"
+                                @disabled(strtoupper(trim($emptyConfirm)) !== 'DELETE')
+                                class="flex items-center gap-2 rounded-lg bg-danger px-4 py-2 text-[0.82rem] font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-35">
+                            <x-icon name="spinner-third" style="solid" class="animate-spin text-[11px]" wire:loading wire:target="emptyTrash" />
+                            Destroy {{ number_format($scopeCount) }} sound(s)
+                        </button>
+
+                        <button wire:click="cancelEmpty"
+                                class="px-3 text-[0.82rem] text-paper/45 underline underline-offset-2 transition hover:text-paper">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            @endif
+        </div>
+    @endif
 
     {{-- ══════ BULK BAR ══════ --}}
     @if ($selected)

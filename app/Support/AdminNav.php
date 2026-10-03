@@ -307,6 +307,60 @@ class AdminNav
             'errors' => Schema::hasTable('error_groups')
                 ? ErrorGroup::where('status', 'open')->where('last_seen_at', '>=', now()->subWeek())->count()
                 : 0,
+
+            /*
+             * ── UNFINISHED CATALOGUE WORK ───────────────────────────────
+             *
+             * Both of these count PUBLISHED sounds only, and that is the
+             * whole point. A draft with no description is a draft; a live
+             * page with no description is a page on the site that says less
+             * about itself than it could. Counting drafts would put a
+             * permanent number here that nobody can ever bring to zero,
+             * which is how a badge stops being read.
+             *
+             * 'uncategorised' was declared in Notices::COUNT_LEVELS and in
+             * its $shape map months ago and WAS NEVER COUNTED HERE, so the
+             * notice could not fire: $counts['uncategorised'] was always
+             * null, fromCounts() read it as 0 and skipped the row. The
+             * comment in the admin sounds filter ("the option somebody
+             * comes here looking for after the bell told them a number")
+             * described a bell that had never said anything. Fixed by the
+             * line below.
+             */
+            'uncategorised' => Sound::where('status', 'published')->whereNull('category_id')->count(),
+
+            /*
+             * Published sounds with nothing in the description column.
+             *
+             * Both spellings of empty, because they are not the same value
+             * and both happen: NULL is a sound nobody ever opened, '' is a
+             * sound somebody opened, cleared and saved. whereNull() alone
+             * would miss the second kind and quietly under-report.
+             *
+             * The description is never written by the AI — SuggestSoundMetadata
+             * leaves its proposal in ai_suggestions and waits for a person —
+             * so this number is the real size of the writing backlog, and it
+             * only goes down when somebody writes something.
+             */
+            'undescribed' => Sound::where('status', 'published')
+                ->where(fn ($q) => $q->whereNull('description')->orWhere('description', ''))
+                ->count(),
+
+            /*
+             * Published sounds with fewer tags than AutoTags::MINIMUM.
+             *
+             * Not doesntHave('tags'). A sound with one tag is not tagged,
+             * it is started, and counting only the zero case would report
+             * it as finished — which is the same mistake as whereNull()
+             * above, in a different column.
+             *
+             * This one the AI CAN fix: tags are written automatically, so a
+             * non-zero number here usually means those jobs never ran. It is
+             * the catalogue-side view of a stopped worker.
+             */
+            'untagged' => Sound::where('status', 'published')
+                ->has('tags', '<', AutoTags::MINIMUM)
+                ->count(),
         ]);
     }
 

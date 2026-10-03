@@ -52,9 +52,54 @@ class DownloadController extends Controller
             abort(451, 'This sound is temporarily unavailable while a copyright claim is reviewed.');
         }
 
-        abort_unless($sound->isPublished(), 404);
-
         $user = $request->user();
+
+        /*
+         * ── YOUR OWN SOUND IS NOT A DOWNLOAD ─────────────────────────────
+         *
+         * A contributor fetching a file they uploaded is not consuming
+         * anything: the master is theirs, it is already on their disk, and
+         * the site is holding a copy of it. Charging a slot of their daily
+         * quota for it would mean the library rationing somebody's access to
+         * their own work — and the most common reason they ask for it is to
+         * check that what we published sounds like what they sent, which is
+         * unpaid quality control we should be encouraging.
+         *
+         * There is no way to game it either. The free downloads it grants
+         * are free downloads OF YOUR OWN FILES, which is a circle.
+         *
+         * Three consequences, all deliberate:
+         *
+         *   · No `downloads` row. That row means "this person accepted the
+         *     licence"; an author does not license their own work from us.
+         *     It would also land in their download history as a sound they
+         *     took from the library, which it is not.
+         *   · downloads_count is untouched. Otherwise an author reloading
+         *     their own file would climb the "most downloaded" ranking, and
+         *     that ranking orders the home page.
+         *   · Unpublished is fine. A sound still in the queue, or rejected,
+         *     is exactly the one somebody needs back — "give me my file" is
+         *     the whole point.
+         *
+         * A live copyright claim is still a wall, and for everybody. That
+         * block is not about who owns the file; it is about us not handing
+         * out a recording whose ownership is being disputed. It is checked
+         * above this, which is why it is not repeated here.
+         */
+        $own = $user !== null && (int) $sound->user_id === (int) $user->id;
+
+        if ($own) {
+            $file = $sound->downloadFile('mp3');
+
+            abort_unless($file, 404, 'No downloadable file for this sound.');
+
+            return Storage::disk($file->disk)->download(
+                $file->path,
+                Downloads::filename($sound->title)
+            );
+        }
+
+        abort_unless($sound->isPublished(), 404);
 
         /*
          * A repeat is decided BEFORE any limit is checked, because a repeat

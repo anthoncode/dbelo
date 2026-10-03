@@ -12,6 +12,7 @@ use App\Http\Middleware\VerifyCaptcha;
 use App\Http\Middleware\WatchTraffic;
 use App\Services\ErrorReporter;
 use App\Services\RedirectResolver;
+use App\Support\DatabaseDown;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -134,5 +135,55 @@ return Application::configure(basePath: dirname(__DIR__))
             }
 
             return app(RedirectResolver::class)->handle($request, $e);
+        });
+
+        /*
+        | The database is not answering.
+        |
+        | ── WHY THIS OVERRIDES APP_DEBUG ──────────────────────────────────
+        |
+        | Every other exception keeps the debug page, and should: a stack
+        | trace is the fastest way to find a bug in your own code. A refused
+        | connection is not a bug in your own code, and the trace is forty
+        | frames of framework internals wrapped around one useful sentence
+        | that is already in the first line. Nothing is lost by replacing it
+        | — the strip at the bottom of the page carries that sentence, plus
+        | the host, the port and the database name.
+        |
+        | ── WHY 503 AND NOT 500 ───────────────────────────────────────────
+        |
+        | Because it is true, and because Google reads it. A temporary
+        | outage answering 500 can cost pages out of the index; 503 with
+        | Retry-After is the documented way to say "busy, come back". For a
+        | site whose whole catalogue lives behind that one connection, that
+        | difference is the difference between an hour of downtime and a
+        | month of recovery.
+        |
+        | DatabaseDown::matches() is deliberately narrow — connection codes
+        | only. A typo in a column name still gets the full trace, because
+        | hiding that behind a calm page is how a real bug survives weeks.
+        */
+        $exceptions->render(function (Throwable $e, Request $request) {
+            if (! DatabaseDown::matches($e)) {
+                return null;
+            }
+
+            $headers = ['Retry-After' => DatabaseDown::RETRY_AFTER];
+
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'message' => 'The service is temporarily unavailable.',
+                ], 503, $headers);
+            }
+
+            /*
+            | response()->view(), not abort() or the errors/503 convention:
+            | this page takes a variable, and it must be rendered without
+            | going near anything that reads the database — which is why it
+            | is its own view and not the site layout.
+            */
+            return response()->view('errors.database', [
+                'detail' => DatabaseDown::detail($e),
+            ], 503, $headers);
         });
     })->create();

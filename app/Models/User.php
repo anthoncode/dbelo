@@ -2,8 +2,8 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Database\Factories\UserFactory;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -41,7 +41,31 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  */
 #[Fillable(['name', 'username', 'email', 'password', 'avatar_path', 'bio', 'website'])]
 #[Hidden(['password', 'two_factor_secret', 'two_factor_recovery_codes', 'remember_token'])]
-class User extends Authenticatable implements PasskeyUser
+/**
+ * ── WHY MustVerifyEmail IS ON THE CLASS ──────────────────────────────────
+ *
+ * It was the commented-out import Laravel ships with, and leaving it that
+ * way made the whole verification feature a decoration.
+ *
+ * The METHODS were always here: hasVerifiedEmail(), markEmailAsVerified()
+ * and sendEmailVerificationNotification() come from a trait inside
+ * Illuminate\Foundation\Auth\User, which is why nothing ever crashed and
+ * why the resend button on /email/verify worked. What was missing is the
+ * INTERFACE — and the interface is what Laravel's SendEmailVerificationNotification
+ * listener checks before sending anything on the Registered event.
+ *
+ * So: config/fortify.php had Features::emailVerification() on, the download
+ * gate had `verify_email` on by default, and the screen told people "we
+ * have sent you a link" — while nobody was ever sent one. Three switches
+ * agreeing with each other and one class not implementing the contract
+ * they all depend on.
+ *
+ * A Google account never sees any of this. GoogleAuthController stamps
+ * email_verified_at at creation and never fires Registered, and the
+ * listener checks hasVerifiedEmail() too — Google confirmed the address
+ * before it reached us, and asking again would be asking twice.
+ */
+class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable, PasskeyAuthenticatable, TwoFactorAuthenticatable;

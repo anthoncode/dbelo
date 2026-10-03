@@ -68,11 +68,24 @@ new #[Layout('layouts.site')] #[Title('Profile settings')] class extends Compone
         return Auth::user() instanceof MustVerifyEmail && ! Auth::user()->hasVerifiedEmail();
     }
 
+    /**
+     * Always. Deleting your account is never gated.
+     *
+     * This used to hide the delete form behind a confirmed address, and it
+     * was harmless only by accident: User did not implement MustVerifyEmail,
+     * so the first branch was always true and the form always showed. Adding
+     * that interface turned a dead condition into a live one, and the
+     * behaviour it produced was indefensible — somebody who signed up with a
+     * typo in their address, and therefore can never confirm it, would be
+     * the one person unable to delete the account they cannot use.
+     *
+     * Kept as a method rather than deleted so the template does not have to
+     * change and the reasoning has somewhere to live.
+     */
     #[Computed]
     public function showDeleteUser(): bool
     {
-        return ! Auth::user() instanceof MustVerifyEmail
-            || (Auth::user() instanceof MustVerifyEmail && Auth::user()->hasVerifiedEmail());
+        return true;
     }
 }; ?>
 

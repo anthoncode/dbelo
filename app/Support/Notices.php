@@ -81,6 +81,17 @@ class Notices
         // costs you reach, which is the same shape as a review queue, not
         // the same shape as a stopped worker.
         'uncategorised' => self::INFO,
+        // Published and playable, with nothing written about it. Blue for
+        // the same reason as the line above: nothing is broken, a visitor
+        // can still find it and download it. It is writing that has not
+        // been done yet, and the only honest colour for unfinished work
+        // you chose to leave unfinished is the quiet one.
+        'undescribed' => self::INFO,
+        // Too few tags to be findable. Also blue, but for a different
+        // reason: this one the AI fills in by itself, so a number here is
+        // usually not a backlog of work — it is the catalogue-side symptom
+        // of jobs that never ran.
+        'untagged' => self::INFO,
     ];
 
     /**
@@ -223,6 +234,47 @@ class Notices
                 'They are live and downloadable, but they appear on no category page — and a category page is a search '
                 .'result with its own title, not just a filter. Their own pages lose the breadcrumb and fall back to a '
                 .'generic description.'],
+
+            /*
+             * The writing backlog.
+             *
+             * Worth a notice rather than only a filter because an empty
+             * description is INVISIBLE on the public page: the whole block,
+             * heading included, is skipped rather than rendered empty. So
+             * the sound looks finished to you and to every visitor, and the
+             * only place the absence shows is a list nobody opens looking
+             * for it.
+             *
+             * The detail says what it actually costs, which is not "the page
+             * looks bare". It is that the meta description falls back to a
+             * sentence generated from title, category and duration — correct,
+             * identical in shape across thousands of pages, and nothing a
+             * person would have written.
+             */
+            'undescribed' => ['align-left', 'admin.sounds',
+                fn ($n) => $n === 1 ? 'One published sound has no description' : "{$n} published sounds have no description",
+                'They are live and downloadable, and their pages say nothing about them — the details block is skipped '
+                .'entirely rather than left empty, so nothing looks wrong. Their search result falls back to a sentence '
+                .'built from the title, category and duration, which reads the same on every one of them.'],
+
+            /*
+             * Under-tagged, which is a different problem wearing similar
+             * clothes.
+             *
+             * Tags ARE written automatically, so this number should drain by
+             * itself. When it does not, the sounds are not waiting on you —
+             * their SuggestSoundMetadata jobs never ran, and the real fix is
+             * on the Queue screen. The detail says so, because sending
+             * somebody to tag two hundred sounds by hand when a worker is
+             * down is the most expensive possible wrong answer.
+             */
+            'untagged' => ['tag', 'admin.sounds',
+                fn ($n) => $n === 1
+                    ? 'One published sound has almost no tags'
+                    : "{$n} published sounds have almost no tags",
+                'Fewer than '.AutoTags::MINIMUM.' tags each, which is below what search needs to find them by anything '
+                .'but their title. Tags are written automatically, so a number here that does not go down usually means '
+                .'those jobs never ran — check the Queue screen before tagging anything by hand.'],
         ];
 
         $notices = [];
@@ -240,6 +292,14 @@ class Notices
             // The sentinel the admin sounds filter understands. See the
             // query in pages/admin/⚡sounds.blade.php.
             'uncategorised' => ['category' => 'none', 'status' => 'published'],
+
+            // Same contract, different filter: `missing` is the admin sounds
+            // page's "what is not filled in" select. Both keys are sent
+            // because the count is of published sounds only, and a notice
+            // that reports 124 and then shows 190 rows has lied about which
+            // ones it meant.
+            'undescribed' => ['missing' => 'description', 'status' => 'published'],
+            'untagged' => ['missing' => 'tags', 'status' => 'published'],
         ];
 
         foreach ($shape as $key => [$icon, $route, $title, $detail]) {

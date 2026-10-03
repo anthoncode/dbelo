@@ -193,11 +193,29 @@ new #[Layout('layouts.admin')] #[Title('Editor')] class extends Component {
         return str_word_count(strip_tags($this->body));
     }
 
-    /** The slug is frozen once published: bookmarks and rankings depend on it. */
+    /**
+     * The slug is frozen once published: bookmarks and rankings depend on it.
+     *
+     * For a SYSTEM page it is frozen for ever, published or not. The footer,
+     * the sitemap, the row of links under every legal page and the Terms'
+     * own internal links all address these by slug; unpublishing one for ten
+     * minutes must not be a window in which the address can change.
+     */
     #[Computed]
     public function slugLocked(): bool
     {
-        return (bool) $this->post?->isLive();
+        return $this->isSystem || (bool) $this->post?->isLive();
+    }
+
+    /**
+     * A page the site cannot do without: Terms, Privacy, the Contributor
+     * Agreement. Editable like any other, but the slug is fixed and the
+     * row cannot be deleted — see the migration that added the flag.
+     */
+    #[Computed]
+    public function isSystem(): bool
+    {
+        return (bool) $this->post?->is_system;
     }
 
     public function updatedTitle(string $value): void
@@ -360,7 +378,10 @@ new #[Layout('layouts.admin')] #[Title('Editor')] class extends Component {
             'post_category_id' => $this->type === Post::TYPE_POST ? $this->categoryId : null,
             'cover_media_id' => $this->coverId,
             'title' => $this->title,
-            'slug' => $this->slug,
+            // The stored slug wins for a system page. The field is
+            // disabled in the form, and a disabled field is a suggestion to
+            // the browser rather than a rule on the server.
+            'slug' => $this->isSystem ? $this->post->slug : $this->slug,
             'excerpt' => $this->excerpt ?: null,
             'body' => $this->body,
             'status' => $this->status,
@@ -499,6 +520,19 @@ new #[Layout('layouts.admin')] #[Title('Editor')] class extends Component {
         <div class="min-w-0 space-y-5">
 
             <div class="rounded-2xl border border-hairline bg-panel">
+
+                @if ($this->isSystem)
+                    {{-- Said once, plainly, where it is relevant. The slug
+                         field below is disabled and a disabled field with no
+                         explanation reads as a bug. --}}
+                    <div class="flex flex-wrap items-center gap-3 border-b border-hairline bg-info/[0.07] px-5 py-3.5">
+                        <x-icon name="lock" style="solid" class="text-[0.8rem] text-info" />
+                        <span class="text-[0.82rem] leading-relaxed text-paper/70">
+                            The site needs this page. Write whatever you like in it — but the address cannot change
+                            and it cannot be deleted, because the footer, the sitemap and the other legal pages link to it.
+                        </span>
+                    </div>
+                @endif
 
                 {{-- Title + address --}}
                 <div class="border-b border-hairline p-5">

@@ -38,6 +38,10 @@
      */
     $sections = [
         ['route' => 'profile.edit', 'label' => __('Profile'), 'icon' => 'user'],
+        // Second, not last. It is the section people come looking for —
+        // which plan am I on, when does it renew, how many downloads do I
+        // have left — and for months there was nowhere to look.
+        ['route' => 'plan.show', 'label' => __('Plan'), 'icon' => 'credit-card'],
         ['route' => 'security.edit', 'label' => __('Security'), 'icon' => 'shield-halved'],
         ['route' => 'appearance.edit', 'label' => __('Appearance'), 'icon' => 'palette'],
     ];

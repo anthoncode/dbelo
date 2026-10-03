@@ -503,12 +503,40 @@ Route::post('unsubscribe/{token}', \App\Http\Controllers\OneClickUnsubscribeCont
 */
 Route::livewire('copyright', 'pages::copyright')->name('claims.create');
 
-Route::controller(LegalController::class)->group(function () {
-    Route::get('terms', 'terms')->name('legal.terms');
-    Route::get('privacy', 'privacy')->name('legal.privacy');
-    Route::get('licenses', 'licenses')->name('legal.licenses');
-    Route::get('contributors', 'contributor')->name('legal.contributor');
-});
+/*
+| The legal pages.
+|
+| ── THREE OF THEM ARE NOW EDITABLE PAGES ─────────────────────────────────
+|
+| Terms, Privacy and the Contributor Agreement live in the CMS: same URLs,
+| same route names, text edited in Admin → Pages like anything else. They
+| are marked is_system, so the slug cannot be changed and the row cannot be
+| deleted — which is what makes it safe for these four links, the footer,
+| the sitemap and the Terms' own internal links to keep pointing here.
+|
+| The route names are kept deliberately. route('legal.terms') appears in
+| the footer, the sitemap, the shell under every legal page and inside the
+| copyright form; pointing them all at route('pages.show', 'terms') would
+| have been a rename with no benefit and a dozen chances to miss one.
+|
+| These routes carry no {page} parameter, so the component works out which
+| page it is serving from the route NAME — see App\Support\Legal::ROUTES.
+| Registered here rather than left to the {page} catch-all at the foot of
+| this file so the names survive and the URLs stay explicit.
+|
+| ── AND ONE OF THEM IS NOT A PAGE AT ALL ─────────────────────────────────
+|
+| /licenses stays with the controller, because it is not prose: it renders
+| the licenses table — each licence's name, version, summary and what it
+| permits — from the rows Admin → Licenses maintains. Turning it into text
+| would freeze today's rows into a document and let the page drift from the
+| licence actually attached to each sound, with nothing to notice it.
+*/
+Route::livewire('terms', 'pages::page')->name('legal.terms');
+Route::livewire('privacy', 'pages::page')->name('legal.privacy');
+Route::livewire('contributors', 'pages::page')->name('legal.contributor');
+
+Route::get('licenses', [LegalController::class, 'licenses'])->name('legal.licenses');
 
 require __DIR__.'/settings.php';
 

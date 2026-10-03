@@ -933,8 +933,71 @@ const register = () => window.Alpine.data('converter', (config) => ({
     time: humanTime,
 }))
 
-if (window.Alpine) {
-    register()
-} else {
-    document.addEventListener('alpine:init', register)
+/*
+ * ═══════════════════════════════════════════════════════════════════════
+ * GETTING REGISTERED, WHENEVER THIS FILE HAPPENS TO RUN
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * The two branches above were right about the problem and wrong about the
+ * cure, and the comment above them says why: this file does not own the
+ * layout whose script order it was assuming.
+ *
+ * Arrive at /converter by typing the URL and everything works — this module
+ * executes before Livewire starts Alpine, the listener is in place, the
+ * event fires, the component registers, Alpine walks the DOM and binds it.
+ *
+ * Arrive by CLICKING A LINK and none of that is true. wire:navigate swaps
+ * the body with Alpine already running; `alpine:init` will never fire
+ * again, so the else-branch is dead. And the if-branch is worse than dead:
+ * Alpine.data() AFTER Alpine has started registers the component for
+ * elements that appear LATER. It does not go back for the ones already on
+ * the page. So it registered, successfully, into the void.
+ *
+ * What that looks like is the bug reported twice: the drop zone with no
+ * height, no heading and a shrunken icon — every :class and x-text on it
+ * doing nothing, because nothing is bound.
+ *
+ * So: register, and then go and bind what Alpine has already walked past.
+ * initTree is the supported way to do that. The guards matter —
+ *
+ *   `registered`     Alpine.data() twice with one name warns in console
+ *                    and is pointless; this module can run once per page
+ *                    and once more per navigation.
+ *
+ *   `_x_dataStack`   Alpine's own marker for "this element is bound". It
+ *                    is internal, which is why it is read and never
+ *                    written. Without the check, a page that bound
+ *                    correctly would be initialised a second time on the
+ *                    next navigation, and a second ffmpeg instance is not
+ *                    a cosmetic problem.
+ */
+let registered = false
+
+const boot = () => {
+    if (! window.Alpine) return
+
+    if (! registered) {
+        register()
+        registered = true
+    }
+
+    document.querySelectorAll('[x-data^="converter("]').forEach((el) => {
+        if (el._x_dataStack?.length) return
+
+        window.Alpine.initTree(el)
+    })
 }
+
+if (window.Alpine) {
+    boot()
+} else {
+    document.addEventListener('alpine:init', () => {
+        register()
+        registered = true
+    })
+}
+
+// The one that was missing. Livewire fires this after it has swapped the
+// body and walked it, which is exactly when an unbound converter is
+// sitting there waiting.
+document.addEventListener('livewire:navigated', boot)
