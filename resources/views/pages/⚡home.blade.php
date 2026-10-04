@@ -9,7 +9,19 @@ use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
-new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Component {
+/*
+ * No #[Title] attribute, deliberately.
+ *
+ * It said 'Sound effects library', and partials/head.blade.php appends
+ * ' — '.config('app.name') to whatever title a page gives it. So the tab
+ * read "Sound effects library — dbelo", which spends the first and most
+ * weighted words of the most valuable line on the site saying "library"
+ * instead of what people actually search for.
+ *
+ * The real title is in shareSeo() below, where it sits next to the
+ * description it has to agree with. One page, one place.
+ */
+new #[Layout('layouts.site')] class extends Component {
 
     public string $q = '';
 
@@ -45,8 +57,43 @@ new #[Layout('layouts.site')] #[Title('Sound effects library')] class extends Co
     public function mount(): void
     {
         view()->share('seo', [
-            'title' => null,   // the landing uses the bare site title
-            'description' => 'Thousands of studio-grade sound effects, cleared for commercial use. Listen to everything free, download with an account.',
+            /*
+             * ── THE TITLE, AND WHY THE BRAND IS AT THE END ───────────────
+             *
+             * head.blade.php appends ' — dbelo' on its own, so this is only
+             * the first part. Writing the brand here would print it twice.
+             *
+             * It leads with "Free sound effects" because that is the phrase
+             * people type; nobody searches "dbelo" yet. The first words of
+             * a title are the ones Google weights and the ones a human scans
+             * in a list of ten blue links, and spending them on an unknown
+             * brand is giving away the best position on the page.
+             *
+             * The brand is not defended here anyway: the WebSite JSON-LD
+             * below is what Google uses for the site name it prints above
+             * the result, and the domain matches a brand search by itself.
+             *
+             * Measured with App\Support\Serp: 56 characters once the suffix
+             * is added, 82% of the width Google gives a title.
+             */
+            'title' => 'Free sound effects for video, games and podcasts',
+
+            /*
+             * NO QUANTITY CLAIM, on purpose.
+             *
+             * This said "Thousands of studio-grade sound effects" while the
+             * catalogue held two. A description that oversells sends people
+             * to a near-empty library, they leave, and the bounce is a
+             * ranking signal — and it is the kind of sentence nobody
+             * remembers to correct in either direction.
+             *
+             * What it promises instead is true today and still true at
+             * fifty thousand, and every clause is verifiable on the site:
+             * listening needs no account, downloads come in MP3 or WAV, and
+             * the licence is stated on each sound.
+             */
+            'description' => 'Free sound effects for video, games and podcasts. Listen to anything without an account, '
+                .'download in MP3 or WAV, and see the exact licence on every sound.',
             'canonical' => route('home'),
             /*
              * ── TWO GRAPHS, AND ONE THAT WAS REMOVED ─────────────────────
