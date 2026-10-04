@@ -58,7 +58,29 @@ return [
             'prefix' => '',
             'prefix_indexes' => true,
             'strict' => true,
-            'engine' => null,
+            /*
+             * InnoDB, SIEMPRE — no lo que el servidor tenga por defecto.
+             *
+             * null significa "usa el motor por defecto de MySQL", y en el
+             * hosting compartido ese valor es MyISAM. MyISAM limita un
+             * índice a 1000 bytes, y una columna varchar(255) en utf8mb4
+             * ocupa 255 x 4 = 1020. La primera migración con una clave
+             * primaria de texto muere con el error 1071, que habla de
+             * bytes y no menciona el motor por ninguna parte.
+             *
+             * InnoDB con row_format dynamic llega a 3072 bytes, así que las
+             * columnas se quedan en 255 y la base del servidor queda
+             * IDÉNTICA a la de desarrollo. La alternativa habitual —
+             * Schema::defaultStringLength(191) — también evita el error,
+             * pero deja local y producción con longitudes distintas, y eso
+             * se paga el día que alguien guarda un texto de 200 caracteres
+             * que en un sitio entra y en el otro no.
+             *
+             * InnoDB es además lo que cualquier aplicación con escrituras
+             * concurrentes necesita: MyISAM bloquea la tabla entera en cada
+             * escritura y no tiene transacciones.
+             */
+            'engine' => 'InnoDB',
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 Mysql::ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
