@@ -30,6 +30,36 @@ return [
     |
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | The audio tools
+    |--------------------------------------------------------------------------
+    |
+    | Where ffmpeg and ffprobe are. Empty means "on the PATH", which is the
+    | answer on any machine where somebody with root ran `apt install ffmpeg`.
+    |
+    | THIS EXISTS FOR THE MACHINES WHERE NOBODY CAN. On shared hosting there
+    | is no root, the host will not install it, and the PATH holds only what
+    | the provider decided — yet a static build dropped in the account's own
+    | home directory runs perfectly well. Without these two settings, an
+    | ffmpeg that exists and works is one the application cannot find.
+    |
+    | A DIRECTORY IS NOT ENOUGH HERE, unlike the mysqldump setting: these are
+    | passed to Process::run() as the command itself, so they are full paths
+    | to the executables.
+    |
+    |   DBELO_FFMPEG=/home/user/bin/ffmpeg
+    |   DBELO_FFPROBE=/home/user/bin/ffprobe
+    |
+    | Left empty on a normal server, where `ffmpeg` resolves on its own.
+    |
+    */
+
+    'audio' => [
+        'ffmpeg' => env('DBELO_FFMPEG') ?: 'ffmpeg',
+        'ffprobe' => env('DBELO_FFPROBE') ?: 'ffprobe',
+    ],
+
     'storage' => [
         'master' => env('DBELO_DISK_MASTER', 'sounds_private'),
         'download' => env('DBELO_DISK_DOWNLOAD', 'sounds_private'),

@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Listeners\RecordAuthEvents;
 use App\Listeners\RecordScheduledTaskFailure;
 use App\Models\Setting;
+use App\Services\AudioProcessor;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Events\ScheduledTaskFailed;
@@ -20,7 +21,23 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        //
+        /*
+         * AudioProcessor, told where ffmpeg and ffprobe are.
+         *
+         * Its constructor defaults to the bare names 'ffmpeg' and 'ffprobe',
+         * which the container would use as-is — and bare names only resolve
+         * when the binaries are on the PATH. On a host where nobody can run
+         * `apt install ffmpeg`, a static build in the account's own home
+         * directory works fine but is invisible to a PATH lookup.
+         *
+         * Bound here rather than read inside the class so the class stays
+         * testable with two paths of a test's choosing, and so this is the
+         * single place that knows about configuration.
+         */
+        $this->app->bind(AudioProcessor::class, fn () => new AudioProcessor(
+            config('dbelo.audio.ffmpeg'),
+            config('dbelo.audio.ffprobe'),
+        ));
     }
 
     public function boot(): void

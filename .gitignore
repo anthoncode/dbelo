@@ -1,6 +1,6 @@
 /.phpunit.cache
 /node_modules
-/public/build
+# /public/build  — se commitea: el hosting compartido no tiene Node
 /public/fonts-manifest.dev.json
 /public/hot
 /public/storage
