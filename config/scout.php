@@ -95,6 +95,22 @@ return [
                     'is_premium',
                     'is_loopable',
                     'duration_ms',
+
+                    /*
+                    | The music side. Null on every sound effect, which the
+                    | engine handles natively — a filter on genre simply
+                    | matches no effects, which is the whole point.
+                    |
+                    | bpm and musical_key are here before any screen filters
+                    | by them, on purpose: adding an attribute to this list
+                    | means re-applying the index settings, and doing that
+                    | once now is cheaper than remembering to do it later.
+                    */
+                    'genre',
+                    'mood',
+                    'bpm',
+                    'musical_key',
+                    'has_vocals',
                 ],
 
                 'sortableAttributes' => [
@@ -102,6 +118,12 @@ return [
                     'downloads_count',
                     'duration_ms',
                     'title',
+
+                    // "Slowest first" on the music page, eventually. Same
+                    // argument as the two filterable fields above: declaring
+                    // it costs a line, forgetting it costs a failed search
+                    // that looks like an empty catalogue.
+                    'bpm',
                 ],
 
                 /*

@@ -91,6 +91,25 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
      */
     public string $editType = Music::TYPE_SFX;
 
+    /*
+     * Genre and mood, in the row.
+     *
+     * ── I PUT THESE ON THE SOUND'S OWN PAGE FIRST AND IT WAS WRONG ───────
+     *
+     * The argument was "five more controls in a table row is a form
+     * pretending to be a list", and it still holds for five. It does not
+     * hold for two: genre and mood are the only music fields the public
+     * filters read, so they are the ones that decide whether a track can be
+     * found at all — and leaving them on another screen meant the row could
+     * mark something as music and then not say what kind.
+     *
+     * BPM and key stay on the sound's own page. Those two need listening to
+     * the track, and that is not what a catalogue list is for. The link at
+     * the foot of this editor goes there.
+     */
+    public string $editGenre = '';
+    public string $editMood = '';
+
     /** Applied by the bulk bar when rows are ticked. */
     public string $bulkCategory = '';
 
@@ -182,7 +201,11 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
             // `files` is eager loaded because every row draws a waveform and
             // offers a preview: without it this is 10 extra queries a page,
             // and 10 more the moment somebody changes the sort.
-            ->with(['category:id,name', 'user:id,name', 'files'])
+            // musicAttribute joins the eager loads because the Category cell
+            // prints the genre for a music row. Without it that cell is one
+            // query per track — ten extra queries a page, and twenty the
+            // moment somebody changes the sort.
+            ->with(['category:id,name', 'user:id,name', 'files', 'musicAttribute'])
             ->when($this->sort === 'recent', fn ($q) => $q->latest('id'))
             ->when($this->sort === 'downloads', fn ($q) => $q->orderByDesc('downloads_count'))
             ->when($this->sort === 'plays', fn ($q) => $q->orderByDesc('plays_count'))
@@ -263,6 +286,18 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
     public function types(): array
     {
         return Music::TYPES;
+    }
+
+    #[Computed]
+    public function genreOptions(): array
+    {
+        return Music::GENRES;
+    }
+
+    #[Computed]
+    public function moodOptions(): array
+    {
+        return Music::MOODS;
     }
 
     /**
@@ -413,12 +448,17 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
         $this->editTags = $sound->tags->pluck('name')->join(', ');
         $this->editDescription = (string) $sound->description;
         $this->editType = $sound->type ?: Music::TYPE_SFX;
+        $this->editGenre = (string) $sound->musicAttribute?->genre;
+        $this->editMood = (string) $sound->musicAttribute?->mood;
         $this->resetErrorBag();
     }
 
     public function cancel(): void
     {
-        $this->reset(['editing', 'editTitle', 'editCategory', 'editTags', 'editDescription', 'editType']);
+        $this->reset([
+            'editing', 'editTitle', 'editCategory', 'editTags',
+            'editDescription', 'editType', 'editGenre', 'editMood',
+        ]);
         $this->resetErrorBag();
     }
 
@@ -432,6 +472,8 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
             // the person who hits it has no way to know which is the rule.
             'editDescription' => ['nullable', 'string', 'max:2000'],
             'editType' => ['required', 'string', 'in:'.implode(',', array_keys(Music::TYPES))],
+            'editGenre' => ['nullable', 'string', 'in:'.implode(',', Music::GENRES)],
+            'editMood' => ['nullable', 'string', 'in:'.implode(',', Music::MOODS)],
         ]);
 
         $sound = Sound::findOrFail($this->editing);
@@ -453,13 +495,33 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
          * in `music_attributes` belonging to something that is not music is
          * invisible on every screen and still answers queries. "Tracks in C
          * minor" would start returning door slams.
-         *
-         * Only on the way DOWN. Switching an effect to music leaves the
-         * fields empty, which is correct — nobody has filled them in yet,
-         * and the sound's own page is where that happens.
          */
         if ($this->editType !== Music::TYPE_MUSIC) {
             $sound->musicAttribute()->delete();
+        } else {
+            /*
+             * Only the two keys this row collects.
+             *
+             * updateOrCreate with the full five would write null over a BPM
+             * somebody typed on the sound's own page — an edit here silently
+             * undoing an edit there. array_filter drops the empties so a
+             * cleared select removes nothing it did not set.
+             *
+             * The consequence, stated: clearing genre back to "—" here does
+             * NOT clear the stored genre, because an absent key and an
+             * emptied key look the same by the time they reach this method.
+             * The sound's own page is where a field gets emptied. A row
+             * editor that can set but not unset is a smaller surprise than
+             * one that wipes a tempo it never showed.
+             */
+            $music = array_filter([
+                'genre' => $this->editGenre ?: null,
+                'mood' => $this->editMood ?: null,
+            ]);
+
+            if ($music !== []) {
+                $sound->musicAttribute()->updateOrCreate([], $music);
+            }
         }
 
         /*
@@ -1042,16 +1104,54 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
         </div>
 
         <div class="overflow-x-auto">
-            <table class="w-full text-left">
+            {{--
+                ── table-fixed, AND IT IS THE WHOLE BUG ───────────────────
+
+                The widths below were already declared and the browser was
+                ignoring them. A table's default layout is `auto`: the
+                browser measures the content and sizes the columns to fit it,
+                treating a `width` as a suggestion. So a long title or a long
+                description made the Sound column as wide as its text, the
+                table grew past the panel, and the Actions column — last in
+                the row — slid out of the overflow-x viewport. The buttons
+                were there; they were off-screen.
+
+                The `truncate` on the title and the description could not
+                save it either. truncate is `overflow: hidden` plus
+                `text-overflow: ellipsis`, and both need a width to overflow
+                FROM. In an auto-layout table the cell has no width of its
+                own — it takes the width of its content — so there was
+                nothing to clip against and the ellipsis never appeared.
+
+                table-fixed makes the declared widths binding: the first row
+                decides, content adapts, and every `truncate` in here starts
+                working for the first time.
+
+                min-w-[1040px] so the squeeze goes to the horizontal
+                scrollbar instead of to the columns. Without it, table-fixed
+                on a narrow window would compress the Wave column to a smear
+                and the buttons into each other — a different way to lose
+                them.
+            --}}
+            <table class="w-full min-w-[1040px] table-fixed text-left">
                 <thead>
                     <tr class="border-b border-hairline text-[0.68rem] uppercase tracking-[0.13em] text-paper/30">
                         <th class="w-10 px-5 py-2.5"></th>
                         <th class="w-40 px-3 py-2.5 font-medium">Wave</th>
                         <th class="px-3 py-2.5 font-medium">Sound</th>
+                        {{-- Holds the category for an effect and the genre for
+                             a track. Same slot, different column — the same
+                             swap the two public pages make. --}}
                         <th class="w-36 px-3 py-2.5 font-medium">Category</th>
                         <th class="w-20 px-3 py-2.5 font-medium">Length</th>
                         <th class="w-24 px-3 py-2.5 font-medium">Downloads</th>
-                        <th class="w-[150px] px-5 py-2.5 text-right font-medium">Actions</th>
+                        {{-- 230px, not 150. Five icon buttons at size-8 plus
+                             gap-1 is 176px, and the cell's px-5 adds 40 more:
+                             the old value was 66px short of what the cell
+                             actually holds. Under the auto layout nobody
+                             noticed, because the browser widened the cell and
+                             pushed the whole table instead. --}}
+                        <th class="w-[230px] px-5 py-2.5 text-right font-medium">Actions</th>
                     </tr>
                 </thead>
 
@@ -1128,12 +1228,34 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
                                                 five more controls in a table row is a form
                                                 pretending to be a list.
                                             --}}
-                                            <select wire:model="editType"
+                                            {{-- .live so the genre and mood controls
+                                                 below appear the moment Music is
+                                                 chosen, instead of after some
+                                                 unrelated click happens to sync. --}}
+                                            <select wire:model.live="editType"
                                                     class="rounded-lg border-0 bg-panel px-3 py-2.5 text-[0.85rem] text-paper focus:outline-none focus:ring-2 focus:ring-brand/40">
                                                 @foreach ($this->types as $value => $label)
                                                     <option value="{{ $value }}">{{ $label }}</option>
                                                 @endforeach
                                             </select>
+
+                                            @if ($editType === 'music')
+                                                <select wire:model="editGenre"
+                                                        class="rounded-lg border-0 bg-panel px-3 py-2.5 text-[0.85rem] text-paper focus:outline-none focus:ring-2 focus:ring-brand/40">
+                                                    <option value="">— genre —</option>
+                                                    @foreach ($this->genreOptions as $option)
+                                                        <option value="{{ $option }}">{{ $option }}</option>
+                                                    @endforeach
+                                                </select>
+
+                                                <select wire:model="editMood"
+                                                        class="rounded-lg border-0 bg-panel px-3 py-2.5 text-[0.85rem] text-paper focus:outline-none focus:ring-2 focus:ring-brand/40">
+                                                    <option value="">— mood —</option>
+                                                    @foreach ($this->moodOptions as $option)
+                                                        <option value="{{ $option }}">{{ $option }}</option>
+                                                    @endforeach
+                                                </select>
+                                            @endif
 
                                             <button wire:click="update"
                                                     class="flex items-center gap-2 rounded-lg bg-action px-5 py-2.5 text-[0.85rem] font-medium text-white transition hover:brightness-110">
@@ -1145,6 +1267,22 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
                                                     class="rounded-lg bg-panel px-4 py-2.5 text-[0.85rem] text-paper/55 transition hover:text-paper">
                                                 Cancel
                                             </button>
+
+                                            {{-- Where the rest of the music fields are.
+                                                 Shown only for a track, and only
+                                                 because this editor deliberately does
+                                                 not hold them: BPM and key need
+                                                 listening to the audio. A control that
+                                                 is missing without saying where it
+                                                 went reads as a control that does not
+                                                 exist. --}}
+                                            @if ($editType === 'music')
+                                                <a href="{{ route('sounds.edit', $sound) }}"
+                                                   class="flex items-center gap-1.5 rounded-lg px-3 py-2.5 text-[0.8rem] text-paper/45 transition hover:text-brand">
+                                                    <x-icon name="sliders" style="solid" class="text-[10px]" />
+                                                    BPM &amp; key
+                                                </a>
+                                            @endif
 
                                             <span class="ml-auto flex items-center gap-2 text-[0.75rem] text-paper/25">
                                                 <x-icon name="lock" style="solid" class="text-[10px]" />
@@ -1302,8 +1440,30 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
                                     </div>
                                 </td>
 
-                                <td class="px-3 py-3 text-[0.82rem] text-paper/55">
-                                    {{ $sound->category?->name ?? '—' }}
+                                {{--
+                                    Category for an effect, genre for a track.
+
+                                    A music row used to show "—" here for ever,
+                                    because the categories are a sound-effect
+                                    taxonomy and a track has no answer in them.
+                                    An em dash in every music row is a column
+                                    saying "not applicable" over and over, when
+                                    the field that IS applicable was sitting
+                                    one table away unshown.
+
+                                    The mood rides underneath in the smaller
+                                    type, the way the play count rides under
+                                    the downloads two cells along.
+                                --}}
+                                <td class="truncate px-3 py-3 text-[0.82rem] text-paper/55">
+                                    @if ($sound->type === 'music')
+                                        <div class="truncate">{{ $sound->musicAttribute?->genre ?? '—' }}</div>
+                                        @if ($sound->musicAttribute?->mood)
+                                            <div class="truncate text-[0.7rem] text-paper/25">{{ $sound->musicAttribute->mood }}</div>
+                                        @endif
+                                    @else
+                                        <div class="truncate">{{ $sound->category?->name ?? '—' }}</div>
+                                    @endif
                                 </td>
 
                                 <td class="px-3 py-3 text-[0.82rem] tabular-nums text-paper/55">
@@ -1315,7 +1475,7 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
                                     <div class="text-[0.7rem] tabular-nums text-paper/25">{{ number_format($sound->plays_count) }} plays</div>
                                 </td>
 
-                                <td class="px-5 py-3">
+                                <td class="whitespace-nowrap px-5 py-3">
                                     <div class="flex items-center justify-end gap-1">
                                         @if ($status === 'trashed')
                                             <x-admin.icon-button icon="rotate-left" variant="brand" label="Restore"

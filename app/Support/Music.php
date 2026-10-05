@@ -153,6 +153,69 @@ class Music
     public const BPM_MAX = 300;
 
     /**
+     * Slug → label, for the genre and mood filters in a URL.
+     *
+     * ── WHY NOT PUT THE LABEL STRAIGHT IN THE URL ────────────────────────
+     *
+     * The column stores "Hip Hop", with a capital and a space. A query
+     * string carrying that reads /music?genre=Hip%20Hop, which is ugly in a
+     * share, ugly in an analytics report, and two different URLs the moment
+     * somebody links it with a + instead of a %20. Google treats those as
+     * separate pages for the same content.
+     *
+     * So the URL holds a slug and the query holds the label, with this map
+     * as the only translation between them. A slug that is not in the map
+     * resolves to null, which the component reads as "no filter" — a
+     * hand-typed /music?genre=nonsense shows everything instead of an empty
+     * page pretending the catalogue is bare.
+     *
+     * Built from the constants rather than written out, so a genre added
+     * above gets its URL for free and the two lists cannot drift.
+     *
+     * @return array<string, string>
+     */
+    public static function genreSlugs(): array
+    {
+        return self::slugMap(self::GENRES);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function moodSlugs(): array
+    {
+        return self::slugMap(self::MOODS);
+    }
+
+    /**
+     * @param  array<int, string>  $values
+     * @return array<string, string>
+     */
+    protected static function slugMap(array $values): array
+    {
+        $map = [];
+
+        foreach ($values as $value) {
+            $map[\Illuminate\Support\Str::slug($value)] = $value;
+        }
+
+        return $map;
+    }
+
+    /**
+     * The label a slug stands for, or null when it stands for nothing.
+     */
+    public static function genreFromSlug(string $slug): ?string
+    {
+        return self::genreSlugs()[$slug] ?? null;
+    }
+
+    public static function moodFromSlug(string $slug): ?string
+    {
+        return self::moodSlugs()[$slug] ?? null;
+    }
+
+    /**
      * The validation rules for the five music fields, in one place.
      *
      * Shared by the single edit screen and the bulk uploader, because a

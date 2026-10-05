@@ -6,6 +6,7 @@ use App\Models\Category;
 use App\Models\Collection;
 use App\Models\Post;
 use App\Models\Setting;
+use App\Models\Sound;
 use Illuminate\Support\Facades\Cache;
 
 /**
@@ -88,6 +89,12 @@ class FooterLinks
 
         if (self::hasListedCollections()) {
             $links[] = ['label' => 'Collections', 'href' => route('collections.index')];
+        }
+
+        // Music, above the categories: it is a half of the catalogue, not a
+        // slice of one. The categories below all link into /sounds.
+        if (self::hasMusic()) {
+            $links[] = ['label' => 'Music', 'href' => route('music.index')];
         }
 
         foreach (self::categories() as $category) {
@@ -241,6 +248,7 @@ class FooterLinks
         Cache::forget('footer.categories');
         Cache::forget('footer.has_packs');
         Cache::forget('footer.has_collections');
+        Cache::forget('footer.has_music');
     }
 
     /**
@@ -255,9 +263,12 @@ class FooterLinks
             // Same shape the sitemap uses, and for the same reason — a top
             // category with nothing of its own but four full children is a
             // full page.
+            // ->sfx() for the same reason the sitemap now has it: /sounds
+            // shows sound effects only, so a category holding nothing but
+            // music is a footer link to a page that says "No sounds found".
             ->where(fn ($q) => $q
-                ->whereHas('sounds', fn ($s) => $s->published())
-                ->orWhereHas('children.sounds', fn ($s) => $s->published()))
+                ->whereHas('sounds', fn ($s) => $s->published()->sfx())
+                ->orWhereHas('children.sounds', fn ($s) => $s->published()->sfx()))
             ->orderBy('sort_order')
             ->orderBy('name')
             ->limit(self::CATEGORIES)
@@ -285,5 +296,32 @@ class FooterLinks
     {
         return Cache::remember('footer.has_collections', now()->addHour(),
             fn () => Collection::listed()->exists());
+    }
+
+    /**
+     * Is there any published music at all?
+     *
+     * Same rule as Packs and Collections: a nav entry leading to an empty
+     * page is worse than no entry. dbelo is a sound-effects library that
+     * happens to carry some music, so /music earns its link by having
+     * something on it, not by existing.
+     *
+     * ── THE HOUR IS THE REAL MECHANISM, NOT flush() ──────────────────────
+     *
+     * flush() is called when a collection is saved, which is not what
+     * changes this answer — publishing a sound is. Nothing hooks that, so
+     * the first track ever published takes up to an hour to put Music in
+     * the nav.
+     *
+     * Left that way on purpose. It happens exactly once in the life of the
+     * site, and the alternative is a cache-busting hook on every sound save
+     * — a live query on every page view's worth of complexity to make one
+     * event faster. The key is listed in flush() anyway so that clearing
+     * the caches by hand does the obvious thing.
+     */
+    public static function hasMusic(): bool
+    {
+        return Cache::remember('footer.has_music', now()->addHour(),
+            fn () => Sound::published()->music()->exists());
     }
 }

@@ -68,6 +68,26 @@ Route::get('convert/{pair}', [\App\Http\Controllers\ConverterController::class, 
 Route::livewire('sounds', 'pages::sounds')->name('sounds.index');
 
 /*
+| The music catalogue.
+|
+| A route of its own rather than /sounds?type=music, and the reason is the
+| page's own: a category tree answers "what is it" and a genre answers "what
+| style is it", so the two halves of the catalogue need different sidebars,
+| different headings and different titles. A query parameter cannot carry a
+| <h1> or a canonical tag.
+|
+| It also keeps /music?genre=corporate available as an indexable page, which
+| is the URL that competes for "corporate background music" — a search with
+| real intent that /sounds could never answer.
+|
+| Registered right after /sounds so the two read as the pair they are. No
+| entry needed in App\Support\ReservedSlugs: it builds its list from the
+| routes that exist, so a CMS page can no longer be given the slug "music"
+| the moment this line is here.
+*/
+Route::livewire('music', 'pages::music')->name('music.index');
+
+/*
 | Downloading.
 |
 | NO 'auth' MIDDLEWARE, on purpose. Whether a visitor without an account may

@@ -37,6 +37,16 @@
     @php
         $navLinks = array_values(array_filter([
             ['Browse', route('sounds.index'), 'sounds.*'],
+            // Music, by the same rule as Packs and Collections below: the
+            // entry appears only when the page has something on it. dbelo is
+            // a sound-effects library that also carries music, so this link
+            // has to earn its place in a bar that cannot grow for ever.
+            //
+            // 'sounds.*' above does NOT match this, because /sounds is now
+            // sound effects only — the two are siblings, not a page and its
+            // filter, and highlighting Browse while the visitor is on Music
+            // would say they are the same place.
+            \App\Support\FooterLinks::hasMusic() ? ['Music', route('music.index'), 'music.*'] : null,
             // Through FooterLinks rather than straight at the model: the
             // footer below asks these same two questions on this same page,
             // and the answer is cached there. Two live queries per page view
@@ -113,13 +123,34 @@
                      Hidden on the catalogue itself, where it would sit two
                      inches above a second search box that does the same
                      thing and is the one that actually filters the page. --}}
-                @unless (request()->routeIs('sounds.index'))
+                {{--
+                    Hidden on BOTH catalogue pages, not just on /sounds.
+
+                    The condition used to name sounds.index alone, which was
+                    right while there was one catalogue. With /music there
+                    were two search boxes stacked on that page — and the top
+                    one posted to /sounds, so searching from it took the
+                    visitor out of the music catalogue they were standing in.
+                    A field that silently moves you somewhere else is worse
+                    than a duplicated field.
+
+                    Everywhere else it goes to the sound effects, and the
+                    placeholder SAYS sound effects rather than the vague
+                    "sounds" it said before. The honest label is what makes
+                    the default defensible: somebody who wanted music can see
+                    they are about to search the other half, and if they
+                    search anyway the empty state on the far side offers them
+                    the music results by name. That bridge is the real answer
+                    to "which half does my word live in?" — not a scope
+                    dropdown in here that nobody opens.
+                --}}
+                @unless (request()->routeIs('sounds.index', 'music.index'))
                     <form action="{{ route('sounds.index') }}" method="GET"
                           class="mx-2 flex min-w-0 flex-1 items-center gap-2 rounded-full bg-ink/[0.05] px-3.5 py-2 transition duration-300 ease-dbelo focus-within:bg-ink/[0.08] md:mx-3 md:max-w-[22rem] dark:bg-paper/[0.07] dark:focus-within:bg-paper/[0.12]">
                         <x-icon name="magnifying-glass" style="regular" class="shrink-0 text-[0.8rem] text-ink/35 dark:text-paper/35" />
                         <input type="search" name="q" value="{{ request('q') }}"
-                               placeholder="Search sounds…"
-                               aria-label="Search sounds"
+                               placeholder="Search sound effects…"
+                               aria-label="Search sound effects"
                                class="w-full min-w-0 border-0 bg-transparent p-0 text-[0.86rem] text-ink placeholder:text-ink/35 focus:outline-none focus:ring-0 dark:text-paper dark:placeholder:text-paper/35" />
                     </form>
                 @endunless

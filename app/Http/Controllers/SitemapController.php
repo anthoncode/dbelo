@@ -50,11 +50,23 @@ class SitemapController extends Controller
              * category_slug = X OR parent_category_slug = X — so a parent
              * with nothing of its own and four full children is a full page,
              * and whereHas('sounds') alone would have dropped it.
+             *
+             * ── AND ONLY SOUND EFFECTS COUNT ────────────────────────────
+             *
+             * /sounds shows sfx only now — music lives at /music — so a
+             * category whose sounds are all music is a category page that
+             * renders "No sounds found". Without ->sfx() this file would
+             * offer Google that page as worth crawling, which is exactly the
+             * thin content the paragraph above removed in its other form.
+             *
+             * It should never happen: the categories are an effects taxonomy
+             * and the edit form says so. But "should never" is how the empty
+             * category pages got here the first time.
              */
             Category::query()
                 ->where(fn ($q) => $q
-                    ->whereHas('sounds', fn ($s) => $s->published())
-                    ->orWhereHas('children.sounds', fn ($s) => $s->published()))
+                    ->whereHas('sounds', fn ($s) => $s->published()->sfx())
+                    ->orWhereHas('children.sounds', fn ($s) => $s->published()->sfx()))
                 ->orderBy('id')
                 ->get()
                 ->each(function ($category) use ($urls) {
@@ -129,6 +141,49 @@ class SitemapController extends Controller
                     'changefreq' => 'yearly',
                     'priority' => $priority,
                 ]);
+            }
+
+            /*
+             * The music catalogue, and one page per genre that has tracks.
+             *
+             * ── THE GENRE PAGES ARE THE POINT ───────────────────────────
+             *
+             * /music on its own competes for "royalty free music", which is
+             * a search dominated by companies with marketing budgets.
+             * /music?genre=corporate competes for "corporate background
+             * music", which is narrower, has clearer intent, and is winnable
+             * by a small catalogue that actually has corporate tracks.
+             *
+             * Those are also the only filtered views on that page that are
+             * indexable — ⚡music.blade.php sets noindex on every other
+             * combination — so this list and that rule have to agree. A URL
+             * offered here and marked noindex there is the mixed signal the
+             * Post loop above avoids.
+             *
+             * Built from what the catalogue HAS, not from Music::GENRES. The
+             * constant lists twenty-one genres; a young catalogue has three,
+             * and the other eighteen are pages that say "No tracks found".
+             */
+            if (Sound::published()->music()->exists()) {
+                $urls->push([
+                    'loc' => route('music.index'),
+                    'changefreq' => 'daily',
+                    'priority' => '0.9',
+                ]);
+
+                $genres = \App\Models\MusicAttribute::query()
+                    ->whereNotNull('genre')
+                    ->whereHas('sound', fn ($q) => $q->published()->music())
+                    ->distinct()
+                    ->pluck('genre');
+
+                foreach ($genres as $genre) {
+                    $urls->push([
+                        'loc' => route('music.index', ['genre' => \Illuminate\Support\Str::slug($genre)]),
+                        'changefreq' => 'weekly',
+                        'priority' => '0.7',
+                    ]);
+                }
             }
 
             if (Post::posts()->live()->exists()) {

@@ -119,9 +119,55 @@ new #[Layout('layouts.site')] #[Title('Sound effects')] class extends Component 
      * Only the attributes listed as filterable in config/scout.php can
      * appear here.
      */
+    /**
+     * Is the configured engine one that this component's search callback can
+     * actually talk to?
+     *
+     * ── WHAT THIS REPLACES, AND WHY IT MATTERS ───────────────────────────
+     *
+     * The callback below is typed `Indexes $index` because that is what
+     * Meilisearch hands it. Scout's DatabaseEngine calls the SAME callback
+     * with an Eloquent query builder instead — see addAdditionalConstraints()
+     * in vendor/laravel/scout/src/Engines/DatabaseEngine.php, which does
+     * `call_user_func($builder->callback, $query, $builder, $builder->query)`.
+     *
+     * So on a server configured with SCOUT_DRIVER=database — which is every
+     * server without a Meilisearch process, including the shared host this
+     * site runs on — every single view of this page threw a TypeError inside
+     * Scout, got swallowed by the catch below, reported itself to the error
+     * log, and set $degraded. The catalogue worked, by accident, through its
+     * own lifeboat, and told every visitor the search was broken.
+     *
+     * Asked rather than discovered by exception. An exception is for the
+     * thing you did not expect; a driver you configured yourself is not
+     * that.
+     *
+     * NOT $degraded. Degraded means "the engine I was told to use is not
+     * answering". A database driver answering exactly as configured is not a
+     * failure, and a warning banner that is permanently lit is a banner
+     * nobody reads — the same argument as the admin badges. What the page
+     * does instead is stop PROMISING typo tolerance it cannot deliver; see
+     * the hero.
+     */
+    protected function hasSearchEngine(): bool
+    {
+        return config('scout.driver') === 'meilisearch';
+    }
+
     protected function filterExpression(): string
     {
         $clauses = [];
+
+        /*
+         * Sound effects only. The music lives at /music.
+         *
+         * First clause and unconditional: this is not a filter the visitor
+         * chose, it is what this page IS. Without it a track would appear in
+         * both catalogues, and the genre filter on the other page would be
+         * narrowing a list that the category filter here had already cut by
+         * a taxonomy music has no place in.
+         */
+        $clauses[] = 'type = "sfx"';
 
         if ($this->category) {
             // Matches both a parent category and any of its children.
@@ -171,6 +217,13 @@ new #[Layout('layouts.site')] #[Title('Sound effects')] class extends Component 
     #[Computed]
     public function sounds()
     {
+        // No engine configured: go straight to the database path. Not a
+        // fallback here — it is the engine, and reaching it by throwing a
+        // TypeError on every request was the bug this replaces.
+        if (! $this->hasSearchEngine()) {
+            return $this->fromDatabase();
+        }
+
         $filter = $this->filterExpression();
         $sort = $this->sortExpression();
 
@@ -217,11 +270,15 @@ new #[Layout('layouts.site')] #[Title('Sound effects')] class extends Component 
     protected function fromDatabase()
     {
         return Sound::published()
+            // Mirrors the unconditional type clause in filterExpression().
+            // Both paths or neither: a restriction that only one of them
+            // applies is how local and production start showing different
+            // catalogues, with nothing failing anywhere.
+            ->sfx()
             ->with(['files', 'category', 'license'])
-            ->when($this->search, fn ($q, $term) => $q->where(fn ($w) => $w
-                ->where('title', 'like', "%{$term}%")
-                ->orWhere('description', 'like', "%{$term}%")
-                ->orWhereHas('tags', fn ($t) => $t->where('name', 'like', "%{$term}%"))))
+            // Through the scope so the count in the "nothing found" message
+            // below is asking the same question this list answers.
+            ->when($this->search, fn ($q, $term) => $q->matching($term))
             ->when($this->category, fn ($q, $slug) => $q->whereHas('category',
                 fn ($c) => $c->where('slug', $slug)
                     ->orWhereHas('parent', fn ($p) => $p->where('slug', $slug))))
@@ -265,6 +322,68 @@ new #[Layout('layouts.site')] #[Title('Sound effects')] class extends Component 
         return filled($this->search) || filled($this->category) || filled($this->duration)
             || $this->freeOnly || $this->loopsOnly || $this->sort !== 'relevance';
     }
+
+    /**
+     * Whether the hero may promise that misspellings still work.
+     *
+     * ── DELIBERATELY NOT `&& ! $this->degraded` ──────────────────────────
+     *
+     * That reads better and would be wrong. $degraded is set inside
+     * sounds(), and the hero renders ABOVE the results — so on the request
+     * where Meilisearch actually dies, this is evaluated before the query
+     * has run and still returns true. A flag that is correct only when
+     * something else happened to be read first is worse than a simpler
+     * flag: it would look right in review and fail in the one case it
+     * exists for.
+     *
+     * The outage case is already covered, two lines below the promise, by
+     * the warning banner that says in full words that there is no typo
+     * tolerance right now. Adjacent and explicit beats clever and ordered.
+     */
+    #[Computed]
+    public function typoTolerant(): bool
+    {
+        return $this->hasSearchEngine();
+    }
+
+    /**
+     * How many tracks the word finds in the OTHER half of the catalogue.
+     *
+     * ── THE HOLE THIS FILLS ──────────────────────────────────────────────
+     *
+     * Somebody searches "corporate piano" here, gets nothing, and leaves
+     * believing the site has no music — while three tracks matching it sit
+     * at /music. Splitting the catalogue in two bought each half a real page
+     * and a real title, and it cost exactly this: neither half could see the
+     * other.
+     *
+     * Nothing new to discover. The alternative shape — a scope selector
+     * inside the search box, the way the big libraries do it — asks the
+     * visitor to know, before typing, which half their word lives in. That
+     * is the one thing they came here to find out, and a dropdown nobody
+     * opens answers it by defaulting to the wrong one in silence.
+     *
+     * Only on the empty path, and only with a query: a result count of zero
+     * because every filter is on is not a question about music, and running
+     * this on a page that found what it was looking for is a query for
+     * nothing.
+     *
+     * Eloquent and not Scout, on purpose. This number is a promise about
+     * another page, so it has to be the same on every driver — a Meilisearch
+     * count here and a LIKE list there would offer "3 tracks" and then show
+     * two.
+     */
+    #[Computed]
+    public function elsewhere(): ?int
+    {
+        if (blank($this->search)) {
+            return null;
+        }
+
+        $count = Sound::published()->music()->matching($this->search)->count();
+
+        return $count > 0 ? $count : null;
+    }
 }; ?>
 
 <div x-data="{
@@ -300,7 +419,22 @@ new #[Layout('layouts.site')] #[Title('Sound effects')] class extends Component 
             <span wire:loading wire:target="search" class="micro shrink-0 pr-3">Searching…</span>
         </div>
 
-        <p class="micro mt-3">Typos are fine — “thundr” finds thunder</p>
+        {{--
+            Only promised where it is true.
+
+            This line used to be unconditional, and on a server without
+            Meilisearch it was a claim the search could not honour: "thundr"
+            finds nothing, and the visitor concludes the catalogue is empty
+            rather than that they mistyped.
+
+            Nothing takes its place when there is no engine. A note saying
+            "spell it correctly" is an apology on a page that should be
+            inviting, and the placeholder above already shows what a query
+            looks like.
+        --}}
+        @if ($this->typoTolerant)
+            <p class="micro mt-3">Typos are fine — “thundr” finds thunder</p>
+        @endif
     </div>
 
     {{-- Said plainly rather than hidden: results really are worse right now,
@@ -482,11 +616,32 @@ new #[Layout('layouts.site')] #[Title('Sound effects')] class extends Component 
                             @endif
                         </p>
 
+                        {{--
+                            The bridge to the other half.
+
+                            Above the "clear filters" button, because it is
+                            the better answer: somebody searching for a word
+                            that lives in the music catalogue does not want
+                            fewer filters, they want the other page. It
+                            carries the query across, so the destination opens
+                            on the results rather than on everything.
+                        --}}
+                        @if ($this->elsewhere)
+                            <a href="{{ route('music.index', ['q' => $search]) }}" wire:navigate
+                               class="mt-5 inline-flex items-center gap-2.5 rounded-full bg-brand px-5 py-2.5 text-[0.85rem] font-medium text-white shadow-brand transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:shadow-brand-lg">
+                                <x-icon name="music" style="solid" class="text-[0.8rem]" />
+                                {{ $this->elsewhere }} {{ Str::plural('track', $this->elsewhere) }} in Music
+                                <x-icon name="arrow-right" style="solid" class="text-[0.7rem]" />
+                            </a>
+                        @endif
+
                         @if ($this->hasFilters)
-                            <button wire:click="clearFilters"
-                                    class="mt-5 rounded-full bg-action px-5 py-2.5 text-[0.85rem] font-medium text-white transition duration-300 ease-dbelo hover:-translate-y-0.5">
-                                Clear filters
-                            </button>
+                            <div>
+                                <button wire:click="clearFilters"
+                                        class="mt-4 text-[0.85rem] text-ink/50 underline transition hover:text-brand dark:text-paper/50">
+                                    Clear filters
+                                </button>
+                            </div>
                         @endif
                     </div>
                 @endforelse

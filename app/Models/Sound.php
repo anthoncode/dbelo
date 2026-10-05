@@ -160,6 +160,36 @@ class Sound extends Model
         return $query->where('is_premium', false);
     }
 
+    /**
+     * What "matches this term" means without a search engine.
+     *
+     * ── ONE DEFINITION, FOUR CALLERS ─────────────────────────────────────
+     *
+     * The same three-column OR was written out in the catalogue page, in the
+     * music page, and twice more for the cross-catalogue counts that tell a
+     * visitor with no results where their word DOES appear. Four copies of
+     * one rule, and the first time somebody adds the search_terms column to
+     * it, three of them keep answering the old question — so the count
+     * offered in the "nothing found" message stops agreeing with what the
+     * other page actually shows.
+     *
+     * Deliberately NOT the same thing as Scout's search(). This is the LIKE
+     * fallback: no typo tolerance, no relevance, no synonyms. It is what
+     * runs wherever Meilisearch does not, and what the counts use on every
+     * driver so the number in the message matches the page it links to.
+     *
+     * The closure matters. Without it the OR escapes and dissolves the
+     * published/type clauses around it, and a search for "thunder" starts
+     * returning drafts.
+     */
+    public function scopeMatching(Builder $query, string $term): Builder
+    {
+        return $query->where(fn ($w) => $w
+            ->where('title', 'like', "%{$term}%")
+            ->orWhere('description', 'like', "%{$term}%")
+            ->orWhereHas('tags', fn ($t) => $t->where('name', 'like', "%{$term}%")));
+    }
+
     public function scopeUnderClaim(Builder $query): Builder
     {
         return $query->where('status', self::STATUS_CLAIMED);
@@ -251,7 +281,7 @@ class Sound extends Model
      */
     public function toSearchableArray(): array
     {
-        $this->loadMissing(['category.parent', 'tags', 'license']);
+        $this->loadMissing(['category.parent', 'tags', 'license', 'musicAttribute']);
 
         return [
             'id' => (int) $this->id,
@@ -288,6 +318,31 @@ class Sound extends Model
             'duration_ms' => (int) $this->duration_ms,
             'is_premium' => (bool) $this->is_premium,
             'is_loopable' => (bool) $this->is_loopable,
+
+            /*
+             * The music attributes, flattened like the category above.
+             *
+             * Meilisearch cannot traverse a relationship, so a filter on
+             * genre has to find the value on the document itself. Null on
+             * every sound effect, which is correct and costs nothing: the
+             * engine stores no field it was not given.
+             *
+             * bpm and musical_key ride along even though nothing filters by
+             * them yet. They are the two a musician actually searches with —
+             * "something around 120" and "something in A minor" — and
+             * backfilling an index is `scout:import` over the whole
+             * catalogue, which is cheap at 4 sounds and not at 40,000.
+             *
+             * A FIELD HERE IS NOT FILTERABLE UNTIL config/scout.php SAYS SO.
+             * Meilisearch rejects a filter on an attribute that is not in
+             * filterableAttributes, and the rejection arrives as a failed
+             * search, not as a mistake anybody can see on the page.
+             */
+            'genre' => $this->musicAttribute?->genre,
+            'mood' => $this->musicAttribute?->mood,
+            'bpm' => $this->musicAttribute?->bpm,
+            'musical_key' => $this->musicAttribute?->musical_key,
+            'has_vocals' => (bool) $this->musicAttribute?->has_vocals,
 
             'downloads_count' => (int) $this->downloads_count,
             'published_at' => $this->published_at?->getTimestamp() ?? 0,
