@@ -154,80 +154,139 @@ class Diagnostics
                 'Compiled '.$this->ago($built).', after the last code change.');
         }
 
-        $behind = (int) round(($newest - $built) / 60);
+        $report = $this->assetsReport();
 
-        /*
-         * SEVERITY BY AGE, not a flat FAIL.
-         *
-         * A flat FAIL was wrong, and wrong in the way this project keeps
-         * warning about: during active work the build goes behind every time
-         * a file is written, so the alarm was on almost permanently — and an
-         * alarm that is always on is one nobody reads, which is how the real
-         * one gets missed. It had already reached that state here.
-         *
-         * Under a day is ordinary drift between one build and the next. Over
-         * a day means somebody has been looking at a stale site for a day
-         * without noticing, which is the failure this check exists for.
-         */
-        $status = $behind >= 1440 ? self::FAIL : self::WARN;
+        return $this->make('build.fresh', 'Front-end', 'Asset build', $report['status'],
+            "The stylesheet is {$report['age']} older than the newest source file.",
+            fix: $report['fix'],
+            command: $report['command']);
+    }
+
+    /**
+     * Minutes after which a stale build stops being drift and becomes a
+     * problem somebody has been living with.
+     *
+     * SEVERITY BY AGE, not a flat FAIL. A flat FAIL was wrong in the way
+     * this project keeps warning about: during active work the build goes
+     * behind every time a file is written, so the alarm was on almost
+     * permanently — and an alarm that is always on is one nobody reads,
+     * which is how the real one gets missed.
+     */
+    public const ASSETS_LOUD_AFTER = 1440;
+
+    /**
+     * Everything anybody needs to say about a stale build, decided once.
+     *
+     * ── WHY THIS EXISTS, WHICH IS A BUG I SHIPPED ────────────────────────
+     *
+     * There are three surfaces showing this one fact: the check on the
+     * diagnostics page, the loud banner across the top of every admin
+     * screen, and the quiet strip when the drift is small. The banner lived
+     * in components/admin/stale-build.blade.php with its OWN copy of the
+     * 1440-minute threshold, its OWN age formatter and its OWN hardcoded
+     * remedy — three duplications of what is below.
+     *
+     * So when the remedy was corrected for a server that has no Vite, the
+     * diagnostics page started telling the truth and the banner kept
+     * printing "Run ./dev.sh and leave it running" across the top of
+     * dbelo.com. One definition, two surfaces, and only one of them fixed —
+     * the exact failure this codebase has a name for.
+     *
+     * The banner is now a renderer: it asks this method and prints what it
+     * gets. The threshold and the wording cannot disagree again because
+     * there is only one of each.
+     *
+     * ── THE REMEDY DEPENDS ON THE MACHINE ────────────────────────────────
+     *
+     * On a development machine the answer is to start Vite and stop having
+     * the problem. On the server there is no Node to start it with, so the
+     * answer is to build on the development machine and let public/build
+     * travel with the deploy — which it now does, because it came out of
+     * .gitignore. A diagnostic naming an impossible fix is worse than
+     * silence: it reads as a bug in the site rather than a missing step.
+     *
+     * ── AND WHAT THIS CANNOT SEE ON A SERVER, SAID OUT LOUD ──────────────
+     *
+     * Never FAIL in production, because the comparison is weaker there than
+     * it looks: git sets a file's mtime to the moment it was CHECKED OUT,
+     * not the moment it was written. After a deploy carrying public/build,
+     * the manifest and the Blade files all claim the same age whether the
+     * CSS matches them or not, and this reads "fresh" either way.
+     *
+     * So on a server this is a smoke alarm that happens to work while
+     * public/build is older than the checkout — not a guarantee. The
+     * guarantee is building before the commit, which is why that rule is
+     * written in .gitignore next to the line that made it necessary.
+     *
+     * @return array{behind:int, age:string, ageLabel:string, loud:bool, status:string, fix:string, command:string, headline:string, detail:string}
+     */
+    public function assetsReport(): array
+    {
+        $behind = $this->assetsBehind();
+        $loud = $behind >= self::ASSETS_LOUD_AFTER;
+        $never = $behind === PHP_INT_MAX;
 
         $unit = fn (int $n, string $word) => $n.' '.\Illuminate\Support\Str::plural($word, $n);
 
         $age = match (true) {
-            $behind >= 1440 => $unit((int) round($behind / 1440), 'day'),
+            $never => 'never built',
+            $behind >= self::ASSETS_LOUD_AFTER => $unit((int) round($behind / 1440), 'day'),
             $behind >= 60 => $unit((int) round($behind / 60), 'hour'),
             default => $unit($behind, 'minute'),
         };
 
-        /*
-         * ── THE SAME FACT, A DIFFERENT REMEDY, ON A SERVER ───────────────
-         *
-         * This check printed "./dev.sh" on dbelo.com for a day. There is no
-         * Vite on that machine, no Node to run it with, and no dev server to
-         * leave running — so the one instruction on screen was the one thing
-         * the reader could not do. A diagnostic that names an impossible fix
-         * is worse than silence: it reads as a bug in the site rather than a
-         * step missing from the deploy.
-         *
-         * The finding was right. The stylesheet really was a day behind,
-         * because /public/build was in .gitignore and deploys are `git pull`
-         * — the compiled CSS never travelled at all. That is now fixed in
-         * .gitignore, and the remedy below is the one that matches.
-         *
-         * ── AND WHAT THIS CHECK CANNOT SEE HERE, SAID OUT LOUD ───────────
-         *
-         * Capped at WARN on a server, never FAIL, because the comparison is
-         * weaker here than it looks. git sets a file's mtime to the moment
-         * it was CHECKED OUT, not the moment it was written — so after a
-         * deploy that carries public/build, the manifest and the Blade files
-         * all claim the same age whether the CSS matches them or not. This
-         * check will read "fresh" either way.
-         *
-         * So it cannot be the guarantee on a server; it is a smoke alarm
-         * that happens to work while public/build is older than the
-         * checkout. The guarantee is building before the commit, which is
-         * why that rule is written where somebody will read it — in
-         * .gitignore, next to the line that made it necessary.
-         */
-        if (app()->isProduction()) {
-            return $this->make('build.fresh', 'Front-end', 'Asset build', self::WARN,
-                "The stylesheet is {$age} older than the newest source file.",
-                fix: 'Any CSS class written since then does not exist in this build, so those elements render with no styling at all — and nothing fails, so nothing is logged. There is no Node on this server: compile on the development machine and let public/build travel with the deploy. Note that after a deploy carrying public/build, every mtime here is the checkout time, so this check reads fresh whether the CSS matches or not — building before the commit is the only real guarantee.',
-                command: 'npm run build');
-        }
+        $production = app()->isProduction();
 
-        return $this->make('build.fresh', 'Front-end', 'Asset build', $status,
-            "The stylesheet is {$age} older than the newest source file.",
-            fix: 'Any CSS class written since then does not exist in the build, so those elements render unstyled — with no error anywhere. Vite is not watching: start it and this stops happening after every change.',
-            command: './dev.sh');
+        return [
+            'behind' => $behind,
+            'age' => $age,
+            'loud' => $loud,
+            /*
+             * WARN until it has been behind for a day, and never worse than
+             * WARN on a server. See the note above on checkout mtimes: a
+             * FAIL there would state more certainty than this comparison
+             * has.
+             */
+            'status' => $loud && ! $production ? self::FAIL : self::WARN,
+            'fix' => $production
+                ? 'Any CSS class written since then does not exist in this build, so those elements render with no styling at all — and nothing fails, so nothing is logged. There is no Node on this server: compile on the development machine and let public/build travel with the deploy. After a deploy that carries public/build every mtime here is the checkout time, so this check reads fresh whether the CSS matches or not — building before the commit is the only real guarantee.'
+                : 'Any CSS class written since then does not exist in the build, so those elements render unstyled — with no error anywhere. Vite is not watching: start it and this stops happening after every change.',
+            'command' => $production ? 'npm run build' : './dev.sh',
+
+            /*
+             * "1 day behind", or "never built".
+             *
+             * Assembled here rather than in the banner, because the two
+             * cases do not take the same suffix: "never built behind" is
+             * what gluing them in the view produces, and that is the kind of
+             * seam that appears the day the rare branch finally fires.
+             */
+            'ageLabel' => $never ? 'never built' : $age.' behind',
+
+            /*
+             * The banner's two parts, SEPARATE.
+             *
+             * The loud banner sets the first clause in bold, so it needs to
+             * know where the clause ends. Splitting one string on its first
+             * full stop inside the view would work until a sentence changed,
+             * and this file exists because of what happened the last time
+             * the banner knew something of its own.
+             */
+            'headline' => $production
+                ? 'This deploy did not bring a fresh build.'
+                : 'The styles have not been rebuilt.',
+            'detail' => $production
+                ? 'Anything written since then renders with no CSS at all — not broken, unpainted. Build on your machine and let public/build travel with the deploy.'
+                : 'Anything written since then renders with no CSS at all — not broken, unpainted. Run ./dev.sh and leave it running.',
+        ];
     }
 
     /**
      * How far the build is behind, in minutes. 0 when it is not.
      *
-     * Public so the banner can choose its own volume. The check above
-     * decides whether this is a problem; the banner decides how loudly to
-     * say so, and those are different questions.
+     * The raw number, with no opinion attached. assetsReport() above turns
+     * it into a severity and a sentence — and it is the only thing that
+     * does, now that the banner has stopped keeping its own copy.
      */
     public function assetsBehind(): int
     {
