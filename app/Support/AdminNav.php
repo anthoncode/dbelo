@@ -326,8 +326,21 @@ class AdminNav
              * comes here looking for after the bell told them a number")
              * described a bell that had never said anything. Fixed by the
              * line below.
+             *
+             * ── SOUND EFFECTS ONLY, AND THIS IS LOAD-BEARING ────────────
+             *
+             * The categories are a sound-effect taxonomy: Doors, Footsteps,
+             * Weather. A music track has no honest answer in that tree —
+             * its genre does that job, in `music_attributes` — so every
+             * track ever published would count as uncategorised work and
+             * this number would never reach zero.
+             *
+             * A badge that cannot be cleared is a badge nobody reads, which
+             * is the same argument as the two comments above and the reason
+             * the stale-login count was left out. The ->sfx() scope keeps
+             * the question answerable.
              */
-            'uncategorised' => Sound::where('status', 'published')->whereNull('category_id')->count(),
+            'uncategorised' => Sound::where('status', 'published')->sfx()->whereNull('category_id')->count(),
 
             /*
              * Published sounds with nothing in the description column.

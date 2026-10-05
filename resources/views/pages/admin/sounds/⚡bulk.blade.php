@@ -10,6 +10,7 @@ use App\Models\SoundFile;
 use App\Models\Tag;
 use App\Services\SoundImporter;
 use App\Support\FilenameMeta;
+use App\Support\Music;
 use App\Support\UploadLimits;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
@@ -47,6 +48,26 @@ new #[Layout('layouts.admin')] #[Title('Bulk upload')] class extends Component {
     public string $bulkTags = '';
     public string $bulkType = '';
     public string $bulkPremium = '';
+
+    /*
+     * ── GENRE AND MOOD, BUT NOT BPM AND KEY ──────────────────────────────
+     *
+     * A batch of music almost always shares its genre and its mood: it comes
+     * from one session, one album, one commission. Setting those fifty times
+     * by hand is exactly the work this screen exists to remove.
+     *
+     * Tempo and key do NOT share. They are per-track, and knowing them means
+     * listening to the track — so a control that set them for fifty files at
+     * once would only ever write the same wrong number fifty times. They
+     * stay on the sound's own edit page, where there is one track in front
+     * of you.
+     *
+     * Offering a field that cannot be answered honestly is worse than not
+     * offering it: it gets filled in anyway, and then the public BPM filter
+     * is confidently wrong.
+     */
+    public string $bulkGenre = '';
+    public string $bulkMood = '';
 
     // ── What happens on save ──
     public bool $publishWhenReady = true;
@@ -94,6 +115,23 @@ new #[Layout('layouts.admin')] #[Title('Bulk upload')] class extends Component {
     public function licenses()
     {
         return License::orderBy('id')->get();
+    }
+
+    /*
+     * The closed lists, through computed properties because a single-file
+     * Livewire component compiles its class and its template separately —
+     * the `use App\Support\Music` above is not in scope in the markup.
+     */
+    #[Computed]
+    public function genres(): array
+    {
+        return Music::GENRES;
+    }
+
+    #[Computed]
+    public function moods(): array
+    {
+        return Music::MOODS;
     }
 
     /**
@@ -258,7 +296,9 @@ new #[Layout('layouts.admin')] #[Title('Bulk upload')] class extends Component {
             'category_id' => (string) ($meta['category_id'] ?? $this->bulkCategory),
             'license_id' => $this->bulkLicense,
             'tags' => $this->bulkTags,
-            'type' => $this->bulkType ?: 'sfx',
+            'type' => $this->bulkType ?: Music::TYPE_SFX,
+            'genre' => $this->bulkGenre,
+            'mood' => $this->bulkMood,
             'is_premium' => $this->bulkPremium === '1',
             'filename' => $name,
             'size' => $file->getSize(),
@@ -330,6 +370,30 @@ new #[Layout('layouts.admin')] #[Title('Bulk upload')] class extends Component {
 
             if ($this->bulkType !== '') {
                 $this->rows[$id]['type'] = $this->bulkType;
+
+                /*
+                 * Switching a batch back to sound effects clears the music
+                 * fields on the rows as it goes.
+                 *
+                 * Without this, choosing Music, picking a genre, then
+                 * realising the batch was effects after all leaves "Rock"
+                 * sitting in fifty rows — invisible, because the controls
+                 * that show it are hidden for effects, and written to the
+                 * database the moment Save is pressed. A hidden field that
+                 * still submits is how forms lie.
+                 */
+                if ($this->bulkType !== Music::TYPE_MUSIC) {
+                    $this->rows[$id]['genre'] = '';
+                    $this->rows[$id]['mood'] = '';
+                }
+            }
+
+            if ($this->bulkGenre !== '') {
+                $this->rows[$id]['genre'] = $this->bulkGenre;
+            }
+
+            if ($this->bulkMood !== '') {
+                $this->rows[$id]['mood'] = $this->bulkMood;
             }
 
             if ($this->bulkPremium !== '') {
@@ -434,6 +498,38 @@ new #[Layout('layouts.admin')] #[Title('Bulk upload')] class extends Component {
             }
 
             $sound->tags()->sync($this->tagIds($row['tags']));
+
+            /*
+             * The music row, written only where there is something to write.
+             *
+             * ?? '' on both reads: rows imported before this field existed —
+             * which, during an upload session that spans a deploy, is a real
+             * possibility — have no 'genre' key at all, and an undefined
+             * index here would take down the whole save for every row after
+             * it. The row is state the browser is holding, so it can be
+             * older than the code reading it.
+             *
+             * delete() on the sfx branch rather than a bare skip: this is the
+             * screen that reclassifies, and a batch moved from music back to
+             * effects has to lose its attributes or "tracks in C minor" will
+             * return door slams forever.
+             *
+             * ONLY the two keys this screen collects are written. Passing the
+             * full five with nulls for bpm and musical_key would make a
+             * second press of Save erase a tempo somebody had typed on the
+             * sound's own page in between — an update that silently undoes
+             * work done elsewhere is the worst kind.
+             */
+            $music = array_filter([
+                'genre' => (string) ($row['genre'] ?? '') ?: null,
+                'mood' => (string) ($row['mood'] ?? '') ?: null,
+            ]);
+
+            if ($row['type'] === Music::TYPE_MUSIC && $music !== []) {
+                $sound->musicAttribute()->updateOrCreate([], $music);
+            } elseif ($row['type'] !== Music::TYPE_MUSIC) {
+                $sound->musicAttribute()->delete();
+            }
 
             $pack?->sounds()->syncWithoutDetaching([
                 $sound->id => ['sort_order' => $order++, 'created_at' => now()],
@@ -898,7 +994,16 @@ memory_limit = 512M</pre>
                         <div class="grid grid-cols-2 gap-3">
                             <div>
                                 <label class="mb-2 block text-[0.72rem] uppercase tracking-[0.14em] text-paper/35">Type</label>
-                                <select wire:model="bulkType"
+                                {{--
+                                    .live, unlike every other field in this bar.
+
+                                    The genre and mood controls below only exist
+                                    when this says Music, and a deferred model
+                                    would mean choosing Music and watching
+                                    nothing happen until some unrelated click
+                                    happened to sync the component.
+                                --}}
+                                <select wire:model.live="bulkType"
                                         class="w-full rounded-lg border-0 bg-raised px-3 py-2.5 text-[0.86rem] text-paper focus:outline-none focus:ring-2 focus:ring-brand/40">
                                     <option value="">—</option>
                                     <option value="sfx">SFX</option>
@@ -916,6 +1021,56 @@ memory_limit = 512M</pre>
                                 </select>
                             </div>
                         </div>
+
+                        {{--
+                            Genre and mood, only for a batch of music.
+
+                            Rendered conditionally and not merely hidden: a
+                            select that is in the DOM still posts its value,
+                            and a genre chosen before the batch was switched
+                            back to effects would be written to the database
+                            by Save with nothing on screen admitting it.
+
+                            Tempo and key are deliberately absent — they are
+                            per-track and belong on the sound's own page. See
+                            the comment on $bulkGenre.
+                        --}}
+                        @if ($bulkType === 'music')
+                            <div class="rounded-lg bg-raised/60 p-4">
+                                <div class="mb-3 flex items-center gap-2 text-[0.72rem] uppercase tracking-[0.14em] text-paper/35">
+                                    <x-icon name="music" style="solid" class="text-[10px]" />
+                                    Music
+                                </div>
+
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="mb-2 block text-[0.72rem] uppercase tracking-[0.14em] text-paper/35">Genre</label>
+                                        <select wire:model="bulkGenre"
+                                                class="w-full rounded-lg border-0 bg-panel px-3 py-2.5 text-[0.86rem] text-paper focus:outline-none focus:ring-2 focus:ring-brand/40">
+                                            <option value="">—</option>
+                                            @foreach ($this->genres as $option)
+                                                <option value="{{ $option }}">{{ $option }}</option>
+                                            @endforeach
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label class="mb-2 block text-[0.72rem] uppercase tracking-[0.14em] text-paper/35">Mood</label>
+                                        <select wire:model="bulkMood"
+                                                class="w-full rounded-lg border-0 bg-panel px-3 py-2.5 text-[0.86rem] text-paper focus:outline-none focus:ring-2 focus:ring-brand/40">
+                                            <option value="">—</option>
+                                            @foreach ($this->moods as $option)
+                                                <option value="{{ $option }}">{{ $option }}</option>
+                                            @endforeach
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <p class="mt-3 text-[0.73rem] text-paper/30">
+                                    BPM and key are per track — set them on each sound's own page.
+                                </p>
+                            </div>
+                        @endif
 
                         <div class="flex gap-2">
                             <button wire:click="applyBulk(true)"

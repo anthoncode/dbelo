@@ -289,9 +289,18 @@ class Notices
          * shape above stays four columns wide and readable.
          */
         $params = [
-            // The sentinel the admin sounds filter understands. See the
-            // query in pages/admin/⚡sounds.blade.php.
-            'uncategorised' => ['category' => 'none', 'status' => 'published'],
+            /*
+             * The sentinel the admin sounds filter understands. See the
+             * query in pages/admin/⚡sounds.blade.php.
+             *
+             * type=sfx travels with it because AdminNav counts sound effects
+             * only — music has no category by design, its genre does that
+             * job. Without this key the notice would say 9 and the list it
+             * opens would show 34, and a notice whose number does not match
+             * the rows it lands on is worse than no notice: it sends you
+             * looking for twenty-five problems that are not problems.
+             */
+            'uncategorised' => ['category' => 'none', 'status' => 'published', 'type' => 'sfx'],
 
             // Same contract, different filter: `missing` is the admin sounds
             // page's "what is not filled in" select. Both keys are sent

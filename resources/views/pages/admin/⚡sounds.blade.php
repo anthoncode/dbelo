@@ -9,6 +9,7 @@ use App\Models\SoundFile;
 use App\Models\Tag;
 use App\Support\AdminNav;
 use App\Support\AutoTags;
+use App\Support\Music;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
@@ -78,6 +79,17 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
      * the list it is being read in.
      */
     public string $editDescription = '';
+
+    /*
+     * Sound effect or music, editable from the row.
+     *
+     * The filter above this list could already narrow by type; nothing could
+     * CHANGE one. That gap is how the first four sounds in this catalogue
+     * ended up as music filed under 'sfx' — the bulk uploader offers the
+     * choice, the default is 'sfx', and after that there was no screen in
+     * the application that could correct it.
+     */
+    public string $editType = Music::TYPE_SFX;
 
     /** Applied by the bulk bar when rows are ticked. */
     public string $bulkCategory = '';
@@ -241,6 +253,19 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
     }
 
     /**
+     * The two types, for the inline editor's select.
+     *
+     * Through a computed property because a single-file Livewire component
+     * compiles its class and its template separately: the `use App\Support\Music`
+     * at the top of this file is not in scope in the markup below.
+     */
+    #[Computed]
+    public function types(): array
+    {
+        return Music::TYPES;
+    }
+
+    /**
      * Packs, with how many sounds each holds.
      *
      * The count is in the label because "Doors (0)" is the answer to a
@@ -387,12 +412,13 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
         $this->editCategory = (string) $sound->category_id;
         $this->editTags = $sound->tags->pluck('name')->join(', ');
         $this->editDescription = (string) $sound->description;
+        $this->editType = $sound->type ?: Music::TYPE_SFX;
         $this->resetErrorBag();
     }
 
     public function cancel(): void
     {
-        $this->reset(['editing', 'editTitle', 'editCategory', 'editTags', 'editDescription']);
+        $this->reset(['editing', 'editTitle', 'editCategory', 'editTags', 'editDescription', 'editType']);
         $this->resetErrorBag();
     }
 
@@ -405,6 +431,7 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
             // column means one screen accepts what the other rejects, and
             // the person who hits it has no way to know which is the rule.
             'editDescription' => ['nullable', 'string', 'max:2000'],
+            'editType' => ['required', 'string', 'in:'.implode(',', array_keys(Music::TYPES))],
         ]);
 
         $sound = Sound::findOrFail($this->editing);
@@ -416,7 +443,24 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
             'title' => trim($this->editTitle),
             'category_id' => $this->editCategory ?: null,
             'description' => trim($this->editDescription) ?: null,
+            'type' => $this->editType,
         ]);
+
+        /*
+         * Demoting a track to a sound effect takes its music row with it.
+         *
+         * Same rule as the sound's own edit page, for the same reason: a row
+         * in `music_attributes` belonging to something that is not music is
+         * invisible on every screen and still answers queries. "Tracks in C
+         * minor" would start returning door slams.
+         *
+         * Only on the way DOWN. Switching an effect to music leaves the
+         * fields empty, which is correct — nobody has filled them in yet,
+         * and the sound's own page is where that happens.
+         */
+        if ($this->editType !== Music::TYPE_MUSIC) {
+            $sound->musicAttribute()->delete();
+        }
 
         /*
          * sync(), so an emptied box removes every tag from THIS sound. The
@@ -1067,6 +1111,30 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
                                                 @endforeach
                                             </select>
 
+                                            {{--
+                                                Sound effect or music, from the row.
+
+                                                Here and not only on the sound's own page
+                                                because misclassification is found by
+                                                READING THE LIST — you notice four tracks
+                                                sitting among the effects — and the fix
+                                                should happen where the problem was seen.
+                                                Sending somebody to four separate pages to
+                                                correct four rows is how catalogues stay
+                                                wrong.
+
+                                                The music details themselves (genre, mood,
+                                                BPM, key) stay on the sound's own page:
+                                                five more controls in a table row is a form
+                                                pretending to be a list.
+                                            --}}
+                                            <select wire:model="editType"
+                                                    class="rounded-lg border-0 bg-panel px-3 py-2.5 text-[0.85rem] text-paper focus:outline-none focus:ring-2 focus:ring-brand/40">
+                                                @foreach ($this->types as $value => $label)
+                                                    <option value="{{ $value }}">{{ $label }}</option>
+                                                @endforeach
+                                            </select>
+
                                             <button wire:click="update"
                                                     class="flex items-center gap-2 rounded-lg bg-action px-5 py-2.5 text-[0.85rem] font-medium text-white transition hover:brightness-110">
                                                 <x-icon name="check" style="solid" class="text-[11px]" />
@@ -1182,6 +1250,24 @@ new #[Layout('layouts.admin')] #[Title('Sounds')] class extends Component {
                                         @if ($sound->publish_when_ready && ! $sound->processed_at)
                                             <span class="rounded bg-raised px-1.5 py-0.5 text-[0.68rem] text-paper/40">
                                                 goes live when ready
+                                            </span>
+                                        @endif
+
+                                        {{--
+                                            Only music wears a chip; effects wear nothing.
+
+                                            A badge on every row carries no information —
+                                            it is the same word a thousand times. dbelo is
+                                            a sound-effects library, so an effect is the
+                                            unremarkable case and marking it would just
+                                            add noise to the one column that has to stay
+                                            scannable. Music is the exception, and the
+                                            exception is what a chip is for.
+                                        --}}
+                                        @if ($sound->type === 'music')
+                                            <span class="flex items-center gap-1 rounded bg-brand/15 px-1.5 py-0.5 text-[0.68rem] text-brand">
+                                                <x-icon name="music" style="solid" class="text-[9px]" />
+                                                Music
                                             </span>
                                         @endif
                                     </div>
