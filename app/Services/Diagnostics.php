@@ -179,6 +179,43 @@ class Diagnostics
             default => $unit($behind, 'minute'),
         };
 
+        /*
+         * ── THE SAME FACT, A DIFFERENT REMEDY, ON A SERVER ───────────────
+         *
+         * This check printed "./dev.sh" on dbelo.com for a day. There is no
+         * Vite on that machine, no Node to run it with, and no dev server to
+         * leave running — so the one instruction on screen was the one thing
+         * the reader could not do. A diagnostic that names an impossible fix
+         * is worse than silence: it reads as a bug in the site rather than a
+         * step missing from the deploy.
+         *
+         * The finding was right. The stylesheet really was a day behind,
+         * because /public/build was in .gitignore and deploys are `git pull`
+         * — the compiled CSS never travelled at all. That is now fixed in
+         * .gitignore, and the remedy below is the one that matches.
+         *
+         * ── AND WHAT THIS CHECK CANNOT SEE HERE, SAID OUT LOUD ───────────
+         *
+         * Capped at WARN on a server, never FAIL, because the comparison is
+         * weaker here than it looks. git sets a file's mtime to the moment
+         * it was CHECKED OUT, not the moment it was written — so after a
+         * deploy that carries public/build, the manifest and the Blade files
+         * all claim the same age whether the CSS matches them or not. This
+         * check will read "fresh" either way.
+         *
+         * So it cannot be the guarantee on a server; it is a smoke alarm
+         * that happens to work while public/build is older than the
+         * checkout. The guarantee is building before the commit, which is
+         * why that rule is written where somebody will read it — in
+         * .gitignore, next to the line that made it necessary.
+         */
+        if (app()->isProduction()) {
+            return $this->make('build.fresh', 'Front-end', 'Asset build', self::WARN,
+                "The stylesheet is {$age} older than the newest source file.",
+                fix: 'Any CSS class written since then does not exist in this build, so those elements render with no styling at all — and nothing fails, so nothing is logged. There is no Node on this server: compile on the development machine and let public/build travel with the deploy. Note that after a deploy carrying public/build, every mtime here is the checkout time, so this check reads fresh whether the CSS matches or not — building before the commit is the only real guarantee.',
+                command: 'npm run build');
+        }
+
         return $this->make('build.fresh', 'Front-end', 'Asset build', $status,
             "The stylesheet is {$age} older than the newest source file.",
             fix: 'Any CSS class written since then does not exist in the build, so those elements render unstyled — with no error anywhere. Vite is not watching: start it and this stops happening after every change.',

@@ -1,6 +1,32 @@
 /.phpunit.cache
 /node_modules
-# /public/build  — se commitea: el hosting compartido no tiene Node
+
+# ─────────────────────────────────────────────────────────────────────────
+# /public/build IS COMMITTED. It used to be ignored, which is the Laravel
+# default and the right default almost everywhere.
+#
+# It is wrong here. The server has no Node — it is shared hosting, and
+# `npm run build` cannot run on it — so the compiled CSS and JS have to
+# arrive some other way. Deploys are `git pull`. Anything not in the
+# repository therefore does not arrive at all.
+#
+# What that cost: the stylesheet on dbelo.com stayed at whatever had once
+# been uploaded by hand, while every deploy brought new Blade files with
+# new Tailwind classes. Tailwind only emits a class that existed at build
+# time, so those elements rendered with no CSS whatever — not broken,
+# unpainted — and nothing failed anywhere. Admin → Diagnostics caught it
+# a day later, which is a day of looking at a half-painted site.
+#
+# The cost of committing it, stated plainly: every deploy commit carries a
+# ~360 KB stylesheet and a ~190 KB bundle, the repository grows, and a
+# conflict in these files is meaningless noise — resolve one by rebuilding,
+# never by merging. For one developer deploying with `git pull`, that is
+# the cheaper of the two mistakes.
+#
+# THE RULE THAT COMES WITH IT: `npm run build` before the commit, every
+# time a Blade file or a stylesheet changed. The build is now part of the
+# deliverable, not a local side effect.
+# ─────────────────────────────────────────────────────────────────────────
 /public/fonts-manifest.dev.json
 /public/hot
 /public/storage
