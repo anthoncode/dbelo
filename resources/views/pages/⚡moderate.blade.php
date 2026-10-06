@@ -28,6 +28,31 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
     public string $reason = '';
 
     /**
+     * The row whose Save was pressed last, if its fields have not been
+     * touched since.
+     *
+     * ── WHY THE FLASH AT THE TOP WAS NOT ENOUGH ──────────────────────────
+     *
+     * refreshList() flashes a sentence that renders under the <h1>, four
+     * hundred lines of markup above the button that triggered it. Livewire
+     * re-renders in place and does not scroll, so on a long list the
+     * confirmation appeared off-screen and the save looked like it had done
+     * nothing.
+     *
+     * Worst on the Live tab, and by design: saveRow() deliberately does not
+     * change the status, so a published row stays exactly where it was with
+     * exactly the same values. There was no visible consequence at all. On
+     * the review tab Approve removes the row from the tab, and that movement
+     * is its own receipt.
+     *
+     * So the receipt now sits on the button that was pressed. The flash
+     * stays for the actions that DO change the list — approve, reject,
+     * retry, take offline — where a sentence at the top is the right place
+     * to explain what moved.
+     */
+    public ?int $savedRow = null;
+
+    /**
      * Which rows the batch buttons act on.
      *
      * @var array<int, bool>
@@ -41,10 +66,54 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
         $this->fillDrafts();
     }
 
+    /**
+     * Any edit to a draft retires the "Saved" badge.
+     *
+     * A receipt sitting next to a field somebody has retyped since is a
+     * receipt that lies, and this screen's whole job is to let somebody
+     * correct text before it goes out. Without this, the badge would claim
+     * the new wording was stored the moment it was typed.
+     *
+     * The generic `updated` hook, deliberately NOT `updatedDrafts` — see the
+     * warning on fillDrafts() below. A method named after a public property
+     * is a name the framework has already taken.
+     */
+    public function updated(string $property): void
+    {
+        if (str_starts_with($property, 'drafts.')) {
+            $this->savedRow = null;
+        }
+    }
+
+    /**
+     * Does this row's Save button currently read "Saved"?
+     *
+     * A plain public method rather than a computed property, because it
+     * takes the row's id and a #[Computed] takes no arguments. Same idiom
+     * the admin list uses for peaks($sound).
+     *
+     * It exists at all so the view does not need a one-line raw-PHP
+     * directive to hold the comparison: this file already contains a block
+     * one further down, and the two forms together are the pairing bug the
+     * comment on the button describes.
+     *
+     * The directive names are spelled out nowhere in this docblock on
+     * purpose. Blade runs its regexes over the WHOLE file, the class at the
+     * top included, and the raw-PHP directives are ones it recognises — so
+     * naming them inside a comment is enough for the compiler to act on
+     * them and corrupt the block they sit in. php -l cannot see it, because
+     * it lints this file rather than what Blade makes of it.
+     */
+    public function justSaved(int $id): bool
+    {
+        return $this->savedRow === $id;
+    }
+
     public function updatedTab(): void
     {
         $this->rejecting = null;
         $this->selected = [];
+        $this->savedRow = null;
 
         // The counts are per tab, so switching tab invalidates all of them.
         unset($this->sounds, $this->suggestedCount, $this->untaggedCount, $this->unsuggestedCount);
@@ -155,6 +224,10 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
         $this->writeDraft($sound);
 
         $this->refreshList("“{$sound->title}” saved.");
+
+        // AFTER refreshList: it is the one that would otherwise clear this,
+        // since every other action on the page wants the badge gone.
+        $this->savedRow = $id;
     }
 
     /**
@@ -518,6 +591,17 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
         // nothing" on an action that worked.
         unset($this->sounds, $this->counts, $this->suggestedCount, $this->untaggedCount, $this->unsuggestedCount);
         $this->fillDrafts();
+
+        /*
+         * The per-row badge belongs to one save and nothing else.
+         *
+         * Cleared here rather than in each caller, so an action added later
+         * cannot leave a "Saved" sitting on a row it did not save. saveRow()
+         * sets it again straight after calling this — the one exception, and
+         * it is the one that earned the badge.
+         */
+        $this->savedRow = null;
+
         session()->flash('moderated', $message);
     }
 }; ?>
@@ -988,10 +1072,42 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
                             {{-- Save without publishing. The two used to be
                                  one button, which meant the only way to keep
                                  a corrected description was to put the sound
-                                 live at the same moment. --}}
+                                 live at the same moment.
+
+                                 THE BUTTON IS ITS OWN RECEIPT. The flash at
+                                 the top of the page renders four hundred
+                                 lines above this, and Livewire does not
+                                 scroll — so on a long list a save looked like
+                                 it had done nothing, worst of all on the Live
+                                 tab where the row does not move afterwards.
+
+                                 Still clickable while it says Saved: the
+                                 state is "this is stored", not "this is
+                                 finished". Disabling it would be a third
+                                 meaning nobody asked for. Any edit to a field
+                                 in this row turns it back into Save — see the
+                                 `updated` hook.
+
+                                 Through $this->justSaved() and NOT a one-line
+                                 @ php(): this file already carries a block
+                                 @ php … @ endphp further up, and Blade lifts
+                                 raw PHP blocks before compiling and pairs the
+                                 first opener it finds with the first closer.
+                                 Mixing the two forms in one file took the
+                                 sound page down once already.
+
+                                 text-ink and not text-white: success is
+                                 #89d206, a bright lime, and white on it is
+                                 barely legible. Dark text on a bright fill is
+                                 what the amber build banner does too. --}}
                             <button wire:click="saveRow({{ $sound->id }})" wire:loading.attr="disabled"
-                                    class="flex items-center gap-2 rounded-full bg-paper px-5 py-2.5 text-[0.85rem] shadow-soft-sm transition hover:-translate-y-0.5 dark:bg-paper/10">
-                                <x-icon name="floppy-disk" style="solid" class="text-xs" /> Save
+                                    @class([
+                                        'flex items-center gap-2 rounded-full px-5 py-2.5 text-[0.85rem] shadow-soft-sm transition duration-300 ease-dbelo hover:-translate-y-0.5',
+                                        'bg-success text-ink' => $this->justSaved($sound->id),
+                                        'bg-paper dark:bg-paper/10' => ! $this->justSaved($sound->id),
+                                    ])>
+                                <x-icon :name="$this->justSaved($sound->id) ? 'check' : 'floppy-disk'" style="solid" class="text-xs" />
+                                {{ $this->justSaved($sound->id) ? 'Saved' : 'Save' }}
                             </button>
 
                             <a href="{{ route('sounds.edit', $sound) }}" wire:navigate
