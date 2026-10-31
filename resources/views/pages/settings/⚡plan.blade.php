@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Plan;
 use App\Models\Transaction;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
@@ -114,6 +115,52 @@ new #[Layout('layouts.site')] #[Title('Your plan')] class extends Component
             ->orderByDesc('id')
             ->limit(24)
             ->get();
+    }
+
+    /**
+     * Everything this account could move to, in the order the home page
+     * shows them.
+     *
+     * ── WHY THE CHOICES ARE HERE AND NOT A LINK AWAY ────────────────────
+     *
+     * This page used to offer one button, "See the plans", pointing at
+     * `home#plans`. So somebody who already had an account and wanted to
+     * change plan was sent out to the MARKETING page — and with
+     * wire:navigate on the link they often landed at the top of it rather
+     * than at the plans.
+     *
+     * That bounce is also what made the loop possible: the home page sent
+     * signed-in visitors here, and this sent them back there. Two pages
+     * each politely deferring to the other, and no way to pay in either.
+     *
+     * The controls themselves are <x-plan-choice>, the same component the
+     * home page uses. That is deliberate and it is the whole point: three
+     * broken buttons on this site were three copies of one decision, and a
+     * fourth copy on this page would have been the fourth.
+     */
+    #[Computed]
+    public function choices()
+    {
+        return Plan::where('is_active', true)
+            ->orderBy('sort_order')
+            ->get()
+            // The plan they are on is already described in full at the top
+            // of this page. Repeating it as a choice would be offering
+            // somebody the thing they already have.
+            ->reject(fn (Plan $plan) => $plan->id === $this->plan?->id)
+            ->values();
+    }
+
+    /**
+     * Is this account already on something that bills again?
+     *
+     * Passed down so the passes can say "Included in your plan" instead of
+     * selling a Pro subscriber a day of what they already have every day.
+     */
+    #[Computed]
+    public function onRecurringPlan(): bool
+    {
+        return (bool) $this->plan?->isRecurring();
     }
 
     public function mount(): void
@@ -280,14 +327,73 @@ new #[Layout('layouts.site')] #[Title('Your plan')] class extends Component
                 </p>
             @endif
 
-            <div class="mt-6 flex flex-wrap gap-3">
-                <a href="{{ route('home') }}#plans" wire:navigate
-                   class="inline-flex items-center gap-2 rounded-full bg-action px-5 py-2.5 text-[0.85rem] text-white transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:brightness-110">
-                    {{ $this->plan && ! $this->plan->isFree() ? __('See the other plans') : __('See the plans') }}
-                    <x-icon name="arrow-right" style="solid" class="text-[0.7rem]" />
-                </a>
-            </div>
         </div>
+
+        {{-- ══════════════════════════════════════════════════════════════
+             CHANGE IT, HERE
+
+             This replaces a button that read "See the plans" and threw the
+             visitor out to the home page. Changing plan is an account
+             action, and an account action belongs on the account screen —
+             the home page is where somebody decides whether to have an
+             account at all.
+
+             Every control below is <x-plan-choice>, shared with the home
+             page. It owns all six states, including the two that are easy
+             to forget on a settings screen: a pass is not for sale to
+             somebody already on Pro, and Free is not a downgrade button
+             while cancelling does not exist.
+             ══════════════════════════════════════════════════════════════ --}}
+        @if ($this->choices->isNotEmpty())
+            <div class="rounded-card bg-surface p-6 shadow-soft-md dark:bg-surface-dark">
+                <div class="micro">{{ __('Change your plan') }}</div>
+
+                <div class="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    @foreach ($this->choices as $choice)
+                        <div class="flex flex-col rounded-[1.1rem] border border-ink/[0.07] p-5 dark:border-paper/[0.09]"
+                             wire:key="choice-{{ $choice->id }}">
+                            <div class="micro">{{ $choice->name }}</div>
+
+                            <div class="mt-1.5 flex items-baseline gap-1.5">
+                                {{-- priceForHumans(), never price_cents
+                                     divided here: a second place that turns
+                                     cents into money is how a $9.00 plan
+                                     ends up advertised at $900. --}}
+                                <span class="text-[1.4rem] font-semibold tracking-[-0.03em]">{{ $choice->priceForHumans() }}</span>
+
+                                @unless ($choice->isFree())
+                                    <span class="text-[0.8rem] text-ink/45 dark:text-paper/45">
+                                        {{ $choice->isOneOff() ? __('once') : '/ '.$choice->interval }}
+                                    </span>
+                                @endunless
+                            </div>
+
+                            @if (filled($choice->features ?? []))
+                                <ul class="mt-4 flex-1 space-y-2">
+                                    @foreach (array_slice($choice->features, 0, 3) as $feature)
+                                        <li class="flex items-start gap-2 text-[0.82rem] text-ink/60 dark:text-paper/60">
+                                            <x-icon name="check" style="solid" class="mt-1 shrink-0 text-[0.65rem] text-success" />
+                                            {{ $feature }}
+                                        </li>
+                                    @endforeach
+                                </ul>
+                            @else
+                                <div class="flex-1"></div>
+                            @endif
+
+                            <div class="mt-5">
+                                <x-plan-choice
+                                    :plan="$choice"
+                                    :current-plan-id="$this->plan?->id"
+                                    :on-recurring="$this->onRecurringPlan"
+                                    block
+                                    :tone="$choice->isOneOff() ? 'action' : 'muted'" />
+                            </div>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+        @endif
 
         {{-- ══════════════════════════════════════════════════════════════
              TODAY'S DOWNLOADS

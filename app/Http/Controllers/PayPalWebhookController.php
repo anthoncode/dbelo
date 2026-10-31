@@ -3,8 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\WebhookEvent;
+use App\Services\PayPal\EventRouter;
 use App\Services\PayPal\PayPalClient;
-use App\Services\PayPal\SubscriptionEvents;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Log;
@@ -25,6 +25,20 @@ use Throwable;
  * This arrives server to server, is signed, and is retried for three days if
  * we are down. So the return URL gives a person something to read, and this
  * decides who has Pro.
+ *
+ * ── WITH ONE EXCEPTION, AND IT IS NOT A LOOPHOLE ─────────────────────────
+ *
+ * The paragraph above is true of SUBSCRIPTIONS, where PayPal charges the card
+ * on its own and we are never in the loop. A one-off pass is different: the
+ * buyer approves an order and then THIS APPLICATION captures the money with
+ * its own credentials. We know it moved because we moved it, before any
+ * webhook arrives.
+ *
+ * So for passes this endpoint is a safety net rather than the authority —
+ * it covers the abandoned tab, the capture call that timed out after
+ * succeeding, and refunds issued inside PayPal days later. OrderEvents
+ * states the split in full; EventRouter decides which handler an event
+ * belongs to, so that this class never has to know.
  *
  * ── FOUR THINGS HAVE TO BE RIGHT, AND THEY ARE IN THIS ORDER ─────────────
  *
@@ -49,7 +63,7 @@ use Throwable;
  */
 class PayPalWebhookController extends Controller
 {
-    public function __invoke(Request $request, PayPalClient $paypal, SubscriptionEvents $events): Response
+    public function __invoke(Request $request, PayPalClient $paypal, EventRouter $events): Response
     {
         $payload = $request->json()->all();
 

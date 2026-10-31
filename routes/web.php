@@ -243,6 +243,33 @@ Route::get('checkout/cancel', [\App\Http\Controllers\CheckoutController::class, 
     ->middleware('auth')
     ->name('checkout.cancel');
 
+/*
+| Buying a pass: the same three steps, a different PayPal API.
+|
+| Separate paths rather than a branch inside checkout/*, because the two
+| flows differ in the one place a shared route could not express: a
+| subscription is granted by PayPal's webhook, a pass is granted by our own
+| capture call inside `return` below. A single controller holding both would
+| be a file whose first rule is "never trust the return URL" and whose second
+| is "the return URL is the authority".
+|
+| Same middleware reasoning as above: 'verified.setting' on start only.
+| Somebody coming back from PayPal having paid must not be bounced to a
+| verification notice — the money has moved and the page they need is the one
+| that says so.
+*/
+Route::post('pass/{plan}', [\App\Http\Controllers\PassCheckoutController::class, 'start'])
+    ->middleware(['auth', 'verified.setting'])
+    ->name('pass.start');
+
+Route::get('pass/return', [\App\Http\Controllers\PassCheckoutController::class, 'return'])
+    ->middleware('auth')
+    ->name('pass.return');
+
+Route::get('pass/cancel', [\App\Http\Controllers\PassCheckoutController::class, 'cancel'])
+    ->middleware('auth')
+    ->name('pass.cancel');
+
 Route::livewire('upload', 'pages::upload')
     ->middleware(['auth', 'verified.setting'])
     ->name('upload');

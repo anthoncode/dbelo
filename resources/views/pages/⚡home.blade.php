@@ -273,6 +273,23 @@ new #[Layout('layouts.site')] class extends Component {
     }
 
     /**
+     * Is this visitor already on a plan that bills again?
+     *
+     * Asked so the passes section can stop offering a day of what somebody
+     * already has every day. Selling a pass to a Pro subscriber takes real
+     * money for nothing, which is worse than a dead button.
+     *
+     * A computed, and the query is the reason: currentPlan() hits the
+     * database, and the passes section is a loop. Resolved once per request
+     * here instead of once per pass.
+     */
+    #[Computed]
+    public function onRecurringPlan(): bool
+    {
+        return (bool) auth()->user()?->currentPlan()?->isRecurring();
+    }
+
+    /**
      * The grid, sized by what is in it.
      *
      * Written out in full in every arm: Tailwind emits a class only if it
@@ -618,70 +635,24 @@ new #[Layout('layouts.site')] class extends Component {
                         </ul>
 
                         {{-- ── WHERE THE BUTTON GOES ────────────────────
-                             It went to /register for everybody, and Fortify
-                             puts `guest` on that route — so a signed-in
-                             visitor clicking "Choose Pro" was bounced
-                             straight back and the page appeared to do
-                             nothing at all.
+                             Every state of this decision now lives in
+                             <x-plan-choice>, and the reason is written in
+                             that file: three separate broken buttons on
+                             this site were three copies of this same
+                             decision, each fixed on its own while the
+                             others kept the defect.
 
-                             Then there was no checkout at all, and a
-                             signed-in visitor was sent to /settings/plan,
-                             which offers a link back to this section — a
-                             loop with no way out. That is what the form
-                             below replaces.
-
-                             A FORM, NOT A LINK, for the paid plans.
-                             Submitting it creates a real subscription at
-                             PayPal; a link would be fetched by prefetchers
-                             and crawlers and twice by anyone who
-                             double-clicks, each one a dangling unapproved
-                             subscription. The free plan stays a link,
-                             because choosing it buys nothing. --}}
-                        @if ($this->currentPlanId === $plan->id)
-                            {{-- Not a link. Offering somebody the plan they
-                                 are already on is the clearest sign a page
-                                 is not looking at who is reading it. --}}
-                            <div class="mt-7 flex items-center justify-center gap-2 rounded-full bg-success/12 py-3 text-center text-[0.88rem] font-medium text-success">
-                                <x-icon name="circle-check" style="solid" class="text-[0.78rem]" />
-                                Your plan
-                            </div>
-                        @elseif (auth()->check() && $plan->isRecurring())
-                            {{-- The real thing. Disabled only when the plan
-                                 has no twin at PayPal yet: a button that
-                                 starts a checkout for a plan nobody can be
-                                 billed for fails on PayPal's own screen,
-                                 which is the worst place to discover it. --}}
-                            @if ($plan->isSyncedWithPayPal())
-                                <form method="POST" action="{{ route('checkout.start', $plan) }}" class="mt-7">
-                                    @csrf
-                                    <button type="submit"
-                                            @class([
-                                                'block w-full rounded-full py-3 text-center text-[0.88rem] font-medium transition duration-300 ease-dbelo hover:-translate-y-0.5',
-                                                'bg-brand text-white shadow-brand hover:shadow-brand-lg' => $isPopular,
-                                                'bg-ink/[0.05] text-ink/70 hover:bg-ink/[0.09] dark:bg-paper/[0.08] dark:text-paper/70' => ! $isPopular,
-                                            ])>
-                                        Subscribe to {{ $plan->name }}
-                                    </button>
-                                </form>
-                            @else
-                                <div class="mt-7 block rounded-full bg-ink/[0.04] py-3 text-center text-[0.88rem] text-ink/40 dark:bg-paper/[0.06] dark:text-paper/40">
-                                    Not available yet
-                                </div>
-                            @endif
-                        @else
-                            <a href="{{ auth()->check() ? route('plan.show') : route('register') }}" wire:navigate
-                               @class([
-                                   'mt-7 block rounded-full py-3 text-center text-[0.88rem] font-medium transition duration-300 ease-dbelo hover:-translate-y-0.5',
-                                   'bg-brand text-white shadow-brand hover:shadow-brand-lg' => $isPopular,
-                                   'bg-ink/[0.05] text-ink/70 hover:bg-ink/[0.09] dark:bg-paper/[0.08] dark:text-paper/70' => ! $isPopular,
-                               ])>
-                                @auth
-                                    Change plan
-                                @else
-                                    {{ $plan->isFree() ? 'Start free' : 'Choose '.$plan->name }}
-                                @endauth
-                            </a>
-                        @endif
+                             What stays here is layout — the margin and the
+                             full-width shape — because those belong to the
+                             card, not to the decision. --}}
+                        <div class="mt-7">
+                            <x-plan-choice
+                                :plan="$plan"
+                                :current-plan-id="$this->currentPlanId"
+                                :on-recurring="$this->onRecurringPlan"
+                                block
+                                :tone="$isPopular ? 'brand' : 'muted'" />
+                        </div>
                     </div>
                 @endforeach
             </div>
@@ -745,17 +716,18 @@ new #[Layout('layouts.site')] class extends Component {
                                 <span class="text-[0.85rem] text-ink/45 dark:text-paper/45">once</span>
                             </div>
 
-                            @if ($this->currentPlanId === $pass->id)
-                                <div class="flex items-center gap-2 rounded-full bg-success/12 px-7 py-3 text-[0.88rem] font-medium text-success">
-                                    <x-icon name="circle-check" style="solid" class="text-[0.78rem]" />
-                                    Active now
-                                </div>
-                            @else
-                                <a href="{{ auth()->check() ? route('plan.show') : route('register') }}" wire:navigate
-                                   class="rounded-full bg-action px-7 py-3 text-[0.88rem] font-medium text-white transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:brightness-110">
-                                    Get the {{ $pass->name }}
-                                </a>
-                            @endif
+                            {{-- Same control as the cards above, inline
+                                 instead of full width. It used to be a link
+                                 to /settings/plan — which offers "See the
+                                 plans", which points back here: a closed
+                                 loop with no way to pay. It was the third
+                                 copy of this decision, and it is why
+                                 <x-plan-choice> exists. --}}
+                            <x-plan-choice
+                                :plan="$pass"
+                                :current-plan-id="$this->currentPlanId"
+                                :on-recurring="$this->onRecurringPlan"
+                                tone="action" />
                         </div>
                     </div>
                 </div>

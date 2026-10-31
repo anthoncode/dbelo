@@ -140,4 +140,43 @@ class Plan extends Model
             default => 'MONTH',
         };
     }
+
+    /**
+     * When a pass bought now stops working.
+     *
+     * ── THE SAME COLUMN MEANS TWO DIFFERENT THINGS ──────────────────────
+     *
+     * For a recurring plan, `interval` is how often PayPal charges. For a
+     * one-off, nothing is ever charged again, so the same column means how
+     * long the thing lasts. One column, two meanings, decided by
+     * isRecurring() — which is why this method is only ever called on a
+     * one-off and says so.
+     *
+     * Reading the duration from the column rather than hardcoding one day is
+     * what lets a week pass be added next year by inserting a row, with no
+     * code change and nobody having to remember this method exists.
+     *
+     * $from makes stacking possible: buying a second pass while one is live
+     * extends from the existing end instead of from now. See
+     * OrderEvents::grant().
+     */
+    public function passEndsAt(?\Illuminate\Support\Carbon $from = null): \Illuminate\Support\Carbon
+    {
+        $from = ($from ?? now())->copy();
+
+        return match ($this->interval) {
+            'day' => $from->addDay(),
+            'week' => $from->addWeek(),
+            'month' => $from->addMonth(),
+            'year' => $from->addYear(),
+
+            /*
+             * An unrecognised interval on a one-off plan is a data problem,
+             * and the shortest window is the safe direction to be wrong in:
+             * under-granting is a support message, over-granting is revenue
+             * given away silently and for as long as nobody notices.
+             */
+            default => $from->addDay(),
+        };
+    }
 }
