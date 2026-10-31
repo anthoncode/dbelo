@@ -162,7 +162,86 @@ Route::livewire('collections/{collection}', 'pages::collections.show')
 | Static segment first so "packs" can never be swallowed by {pack}.
 */
 Route::livewire('packs', 'pages::packs')->name('packs.index');
+
+/*
+| The whole pack as one zip.
+|
+| BEFORE packs/{pack}, because a route with a static tail still has to beat
+| the placeholder that could swallow its first segment — and more to the
+| point, registering it after would make "download" look like a pack slug
+| on the day somebody mistypes the URL.
+|
+| No 'signed' middleware even though the link IS signed. The controller
+| checks the signature itself so an expired one can redirect to the pack
+| instead of answering 403: an expired link is almost always a person who
+| left a tab open, and the pack page has a fresh button on it.
+|
+| 'throttle:downloads' is the same limiter the single download uses. It is
+| close to useless against the distributed scraper we found — one request
+| per address — but it is the thing that stops ONE address streaming forty
+| archives in a minute, which is the failure this endpoint can actually
+| cause on shared hosting.
+*/
+Route::get('packs/{pack}/download', \App\Http\Controllers\PackDownloadController::class)
+    ->middleware(['verified.setting', 'throttle:downloads'])
+    ->name('packs.download');
+
 Route::livewire('packs/{pack}', 'pages::packs.show')->name('packs.show');
+
+/*
+| Where PayPal tells us what happened.
+|
+| NO MIDDLEWARE AT ALL, and every piece of that is deliberate:
+|
+|   no 'auth'       a machine is posting, not a person
+|   no 'verified'   same
+|   no CSRF         exempted in bootstrap/app.php, where the reason is
+|                   written next to the exemption
+|   no throttle     PayPal retries a failed delivery for three days, and a
+|                   429 is a failure. Rate-limiting the gateway is how an
+|                   outage turns into three days of rejected events and a
+|                   customer who paid and never got Pro.
+|
+| The protection is the SIGNATURE, checked inside the controller against
+| PAYPAL_WEBHOOK_ID. Until that value is set the controller rejects
+| everything, which is the correct direction for an unconfigured site.
+|
+| The path is fixed rather than configurable because PayPal stores it: it
+| is registered once in their dashboard, and a URL that can change in a
+| settings screen is a URL that silently stops matching what PayPal has.
+| App\Services\PayPal and the admin screen both build it from app.url.
+*/
+Route::post('webhooks/paypal', \App\Http\Controllers\PayPalWebhookController::class)
+    ->name('webhooks.paypal');
+
+/*
+| Buying a plan.
+|
+| START IS POST. It creates a real subscription at PayPal, and a GET would
+| be fetched by link prefetchers, by crawlers, and twice by anybody who
+| double-clicks — each one a dangling unapproved subscription sitting in
+| the PayPal account. The plan cards submit a form for this reason.
+|
+| RETURN AND CANCEL ARE GET, because PayPal redirects a browser to them and
+| a redirect is always a GET. They are behind 'auth' all the same: the
+| return page reads who is standing there and refuses a subscription whose
+| custom_id belongs to somebody else.
+|
+| 'verified.setting' on start only. Somebody coming back from PayPal having
+| paid must not be bounced to a verification notice — the money has moved
+| and the page they need is the one that says so.
+*/
+Route::post('checkout/{plan}', [\App\Http\Controllers\CheckoutController::class, 'start'])
+    ->middleware(['auth', 'verified.setting'])
+    ->name('checkout.start');
+
+Route::get('checkout/return', [\App\Http\Controllers\CheckoutController::class, 'return'])
+    ->middleware('auth')
+    ->name('checkout.return');
+
+Route::get('checkout/cancel', [\App\Http\Controllers\CheckoutController::class, 'cancel'])
+    ->middleware('auth')
+    ->name('checkout.cancel');
 
 Route::livewire('upload', 'pages::upload')
     ->middleware(['auth', 'verified.setting'])

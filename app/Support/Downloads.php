@@ -2,8 +2,10 @@
 
 namespace App\Support;
 
+use App\Models\Sound;
 use App\Support\Concerns\SettingFields;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 
 /**
@@ -191,5 +193,90 @@ class Downloads
         $name = Str::slug($title) ?: 'sound';
 
         return trim($site.'-'.$name, '-').'.'.$extension;
+    }
+
+    /* ═══════════════════════════ The link ═══════════════════════════ */
+
+    /**
+     * How long a download link stays good for.
+     *
+     * Twelve hours, and the number is a compromise between two real costs.
+     *
+     * TOO SHORT and a page left open over lunch hands somebody an expired
+     * link, which is a working site that appears broken. TOO LONG and a
+     * link harvested once keeps working, which is the thing this exists to
+     * prevent.
+     *
+     * Half a day covers every session a person actually has, and a scraper
+     * that wants a link that lasts has to come back and render the page
+     * again — which is the cost being imposed.
+     */
+    public const LINK_HOURS = 12;
+
+    /**
+     * The download link for a sound: signed, and good for half a day.
+     *
+     * ── WHAT THIS BUYS, AND WHAT IT DOES NOT ─────────────────────────────
+     *
+     * The first 471 rows in the downloads table had no account on a single
+     * one of them. 97 were AdSense's crawler. The rest arrived one or two
+     * requests per IP, from dozens of addresses — several of them Alibaba
+     * and Google Cloud ranges — every one claiming to be a desktop browser
+     * on a Mac. A Mac does not live in a datacenter. That is one scraper
+     * rotating addresses so that no address looks busy.
+     *
+     * Against that shape the existing defences do nothing. The rate limiter
+     * counts per IP and they make one request per IP. robots.txt is a
+     * request and they are already lying about who they are. And the URL
+     * itself was guessable: /sounds/{slug}/download, with every slug listed
+     * in the sitemap. The catalogue could be taken without ever loading a
+     * page of it.
+     *
+     * A signature breaks exactly that: the link now has to be ISSUED, and
+     * it is only issued while rendering the page the sound lives on.
+     *
+     * What it does NOT do, said plainly so nobody expects more: it does not
+     * stop anyone willing to fetch the page first and read the link out of
+     * it. That is a few more lines in a scraper. The point is not that it
+     * cannot be done — it is that it can no longer be done from the sitemap
+     * alone, and it now costs a page render per file instead of a guessed
+     * URL per file.
+     *
+     * The route keeps NO 'signed' middleware. The controller checks the
+     * signature itself and redirects an expired link back to the sound,
+     * where a fresh one is waiting. Laravel's middleware answers 403, and a
+     * 403 at the single highest-intent moment on the site — somebody who
+     * wants a file — is the same mistake abort(429) was making before the
+     * limit screen replaced it.
+     */
+    public static function url(Sound $sound): string
+    {
+        return URL::temporarySignedRoute(
+            'sounds.download',
+            now()->addHours(self::LINK_HOURS),
+            $sound,
+        );
+    }
+
+    /**
+     * The same for a whole pack.
+     *
+     * Signed for the same reason and more urgently: one request against
+     * this URL is the entire curated set, where a sound's URL is one file.
+     * The thing worth hardest protecting is the one that costs the most to
+     * lose.
+     *
+     * Takes the slug rather than the model because the controller looks the
+     * pack up through featured() — any collection would resolve through
+     * route model binding, and most collections are somebody's private
+     * folder.
+     */
+    public static function packUrl(\App\Models\Collection $pack): string
+    {
+        return URL::temporarySignedRoute(
+            'packs.download',
+            now()->addHours(self::LINK_HOURS),
+            ['pack' => $pack->slug],
+        );
     }
 }

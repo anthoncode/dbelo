@@ -90,7 +90,10 @@
 
         <x-share-menu :url="route('sounds.show', $sound)" :title="$sound->title" size="size-9" />
 
-        <a href="{{ route('sounds.download', $sound) }}"
+        {{-- Signed, and issued here. See App\Support\Downloads::url(): the
+             bare route was constructable from the sitemap, so the catalogue
+             could be taken without ever loading a page of it. --}}
+        <a href="{{ \App\Support\Downloads::url($sound) }}"
            aria-label="Download {{ $sound->title }}"
            title="Download"
            class="grid size-9 shrink-0 place-items-center rounded-full bg-surface text-ink/55 shadow-soft-sm transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:text-action hover:shadow-soft-md dark:bg-surface-dark dark:text-paper/55">

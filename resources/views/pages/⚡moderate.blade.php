@@ -180,8 +180,24 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
         $suggestion = $sound->ai_suggestions;
         $draft = $this->drafts[$id] ?? [];
 
-        if ($overwrite || trim((string) ($draft['description'] ?? '')) === '') {
-            $draft['description'] = (string) ($suggestion['meta_description'] ?? '');
+        /*
+         * An absent description writes NOTHING, not an empty string.
+         *
+         * SoundSuggester::cleanDescription() returns null whenever the
+         * model's answer came back under DESCRIPTION_FLOOR — too short to be
+         * an answer — while the tags and the category of that same call
+         * survive their own cleaning. So a suggestion with tags and no text
+         * is a normal, expected shape.
+         *
+         * Without this guard, "Replace everything" on such a suggestion
+         * wiped a description somebody had written and put an empty string
+         * in its place. The button looked like it was offering something and
+         * was in fact deleting — the worst version of a control that lies,
+         * because the thing it destroyed was the work being reviewed.
+         */
+        if (filled($suggestion['meta_description'] ?? null)
+            && ($overwrite || trim((string) ($draft['description'] ?? '')) === '')) {
+            $draft['description'] = (string) $suggestion['meta_description'];
         }
 
         if ($overwrite || trim((string) ($draft['tags'] ?? '')) === '') {
@@ -951,20 +967,60 @@ new #[Layout('layouts.site')] #[Title('Moderation')] class extends Component {
                                     </span>
                                 </label>
 
-                                <button wire:click="applySuggestion({{ $sound->id }})"
-                                        class="ml-auto rounded-full bg-brand px-4 py-1.5 text-[0.78rem] font-medium text-white transition hover:-translate-y-0.5">
-                                    Use the description
-                                </button>
+                                {{-- Offered only when there is a description
+                                     to offer. With an empty one this button
+                                     used to sit here looking like the main
+                                     action and do nothing — and under
+                                     "Replace everything" it cleared the
+                                     field. --}}
+                                @if (! empty($sound->ai_suggestions['meta_description']))
+                                    <button wire:click="applySuggestion({{ $sound->id }})"
+                                            class="ml-auto rounded-full bg-brand px-4 py-1.5 text-[0.78rem] font-medium text-white transition hover:-translate-y-0.5">
+                                        Use the description
+                                    </button>
 
-                                <button wire:click="applySuggestion({{ $sound->id }}, true)"
-                                        class="text-[0.78rem] text-ink/45 underline underline-offset-2 transition hover:text-brand dark:text-paper/45">
-                                    Replace everything
+                                    <button wire:click="applySuggestion({{ $sound->id }}, true)"
+                                            class="text-[0.78rem] text-ink/45 underline underline-offset-2 transition hover:text-brand dark:text-paper/45">
+                                        Replace everything
+                                    </button>
+                                @endif
+
+                                {{-- ── ASK AGAIN, FROM INSIDE THE PANEL ──────
+                                     The only other "Ask for one" lives in the
+                                     @ elseif below, which by definition never
+                                     renders while a suggestion exists. So a
+                                     suggestion that came back thin was a dead
+                                     end: nothing to accept and no way to try
+                                     again without going to the database.
+
+                                     ml-auto only when it is alone on the row,
+                                     so it does not fight the brand button for
+                                     the right edge. --}}
+                                <button wire:click="suggest({{ $sound->id }})"
+                                        @class([
+                                            'text-[0.78rem] text-ink/45 underline underline-offset-2 transition hover:text-brand dark:text-paper/45',
+                                            'ml-auto' => empty($sound->ai_suggestions['meta_description']),
+                                        ])>
+                                    Ask again
                                 </button>
                             </div>
 
                             @if (! empty($sound->ai_suggestions['meta_description']))
                                 <p class="text-[0.9rem] leading-relaxed text-ink/70 dark:text-paper/70">
                                     {{ $sound->ai_suggestions['meta_description'] }}
+                                </p>
+                            @else
+                                {{-- Says WHY, because the alternative is a
+                                     blank space that reads as a broken screen.
+                                     The model did answer; the answer came back
+                                     under SoundSuggester::DESCRIPTION_FLOOR
+                                     and was dropped on purpose, and the tags
+                                     below came from that same call. Without
+                                     this line the two facts look unrelated. --}}
+                                <p class="text-[0.86rem] leading-relaxed text-ink/45 dark:text-paper/45">
+                                    No description came back — the model's answer was too short to be
+                                    one, so it was dropped rather than shown. The tags below are from
+                                    the same attempt and are fine. Asking again usually produces one.
                                 </p>
                             @endif
 

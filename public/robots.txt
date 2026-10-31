@@ -41,4 +41,41 @@ Allow: /
 # fetch it".
 Disallow: /sounds/*/download
 
+# ── AND THE SAME RULE AGAIN, BECAUSE ADSENSE DOES NOT READ THE ONE ABOVE ──
+#
+# Google's own documentation on special-case crawlers says of
+# Mediapartners-Google, the AdSense crawler: "The global user agent (*) is
+# ignored."
+#
+# So everything above this line is invisible to it. The download rule was
+# written, was correct, and was addressed to somebody who does not listen —
+# and the downloads table proves it: 98 of the first 471 downloads came from
+# Mediapartners-Google, out of Google's 192.178.16.x and 74.125.151.x
+# ranges, on a catalogue with four sounds and no human visitors. Every one
+# of the 471 had no account.
+#
+# Allow: / FIRST, and it matters. AdSense fetches pages to work out what the
+# site is about so it can serve ads that fit; a blanket block here would
+# leave the ads generic and the revenue with them. The crawler is welcome
+# everywhere a reader is. It is the download ACTION it has no business
+# performing.
+#
+# Adding a group for one crawler does not help with the others, and it is
+# not meant to. Anything that lies about what it is walks past every line in
+# this file. That is what App\Support\Bots is for: this saves the bandwidth
+# of the honest ones, and the counter refuses to count either kind.
+User-agent: Mediapartners-Google
+Allow: /
+Disallow: /sounds/*/download
+
+# AdsBot ignores the global group too, and for the same reason: it checks
+# landing-page quality for ads. Same answer — read anything, fetch nothing.
+User-agent: AdsBot-Google
+Allow: /
+Disallow: /sounds/*/download
+
+User-agent: AdsBot-Google-Mobile
+Allow: /
+Disallow: /sounds/*/download
+
 Sitemap: https://dbelo.com/sitemap.xml

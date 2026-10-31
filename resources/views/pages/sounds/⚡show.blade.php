@@ -649,7 +649,8 @@ new #[Layout('layouts.site')] #[Title('Sound effect')] class extends Component {
 
                     <x-share-menu :url="route('sounds.show', $sound)" :title="$sound->title" tone="dark" />
 
-                    <a href="{{ route('sounds.download', $sound) }}"
+                    {{-- Signed — see App\Support\Downloads::url(). --}}
+                    <a href="{{ \App\Support\Downloads::url($sound) }}"
                        class="flex items-center gap-2.5 rounded-full bg-action px-7 py-3 font-medium text-white transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:brightness-110">
                         <x-icon name="arrow-down-to-line" style="solid" class="text-[0.85rem]" />
                         Download

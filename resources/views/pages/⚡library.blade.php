@@ -191,7 +191,8 @@ new #[Layout('layouts.site')] #[Title('Your library')] class extends Component {
 
                         <livewire:favorite-button :sound="$sound" :key="'favbtn-'.$sound->id" />
 
-                        <a href="{{ route('sounds.download', $sound) }}"
+                        {{-- Signed — see App\Support\Downloads::url(). --}}
+                        <a href="{{ \App\Support\Downloads::url($sound) }}"
                            class="shrink-0 rounded-full bg-paper px-5 py-2.5 text-[0.83rem] font-medium shadow-soft-sm transition hover:-translate-y-0.5 dark:bg-paper/10">
                             Download
                         </a>

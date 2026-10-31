@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Download;
 use App\Models\Sound;
+use App\Support\Bots;
 use App\Support\Downloads;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -50,6 +51,39 @@ class DownloadController extends Controller
         // while a copyright claim is open.
         if ($sound->isUnderClaim()) {
             abort(451, 'This sound is temporarily unavailable while a copyright claim is reviewed.');
+        }
+
+        /*
+         * ── THE LINK HAS TO HAVE BEEN ISSUED ─────────────────────────────
+         *
+         * Downloads::url() signs it while rendering the page the sound
+         * lives on, for twelve hours. Arriving here without that signature
+         * means the URL was constructed rather than followed — and the URL
+         * was trivially constructable: /sounds/{slug}/download, with every
+         * slug published in the sitemap. The whole catalogue was takeable
+         * without loading a single page of it.
+         *
+         * A REDIRECT, NOT A 403. Laravel's 'signed' middleware answers 403,
+         * and the one place on this site where a dead end costs the most is
+         * the moment somebody wants a file. An expired link is overwhelm-
+         * ingly a person who left a tab open: sending them to the sound,
+         * where a fresh button is already rendered, costs them one click and
+         * no explanation. Same reasoning that replaced abort(429) with the
+         * limit page.
+         *
+         * It also means a scraper gets HTML instead of audio, which is the
+         * cheapest possible way to say no.
+         *
+         * The tracking parameters are ignored because a shared link that
+         * picks up ?utm_source= on the way would otherwise fail its own
+         * signature, and the failure would look like the feature being
+         * broken rather than a parameter being appended.
+         */
+        if (! $request->hasValidSignature(ignoreQuery: [
+            'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term',
+            'gclid', 'fbclid', 'ref',
+        ])) {
+            return redirect()->route('sounds.show', $sound);
         }
 
         $user = $request->user();
@@ -120,7 +154,38 @@ class DownloadController extends Controller
 
         abort_unless($file, 404, 'No downloadable file for this sound.');
 
-        if (! $repeat) {
+        /*
+         * ── A ROBOT STILL GETS THE FILE. IT DOES NOT GET COUNTED. ────────
+         *
+         * The two halves of that sentence are separate decisions.
+         *
+         * NOT COUNTED, because a crawler walking the catalogue does not add
+         * noise — it adds noise shaped like popularity. downloads_count
+         * orders the categories on the public site and feeds every figure
+         * on the analytics screen, so the catalogue would reorganise itself
+         * around whatever a scraper happened to visit. The first 471 rows
+         * in this table were all of them accountless and 98 were AdSense's
+         * crawler, on a catalogue of four sounds with no human visitors.
+         *
+         * STILL SERVED, because a user agent is a claim and not an
+         * identity. Refusing on one eventually refuses a person behind a
+         * proxy that rewrites the header, and that costs somebody a file
+         * they are entitled to; serving one extra copy to a crawler costs
+         * bandwidth. Of the two mistakes, this is the cheaper one — and
+         * robots.txt is where the request not to fetch belongs.
+         *
+         * Nothing is logged either: a Download row is the record of
+         * somebody ACCEPTING a licence, and a program accepts nothing.
+         *
+         * Its own variable rather than folding this into $repeat. They are
+         * different facts — "they already have this one" and "this is not a
+         * person" — and $repeat is read by the quota rules above, where a
+         * crawler quietly counting as a repeat visitor would be a second,
+         * invisible meaning nobody asked for.
+         */
+        $countable = ! $repeat && ! Bots::looksAutomated($request->userAgent());
+
+        if ($countable) {
             Download::create([
                 // NULL is a real answer here, not a missing one: the column
                 // is nullable and this row is a download by somebody with no

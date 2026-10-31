@@ -129,6 +129,60 @@ new #[Layout('layouts.site')] #[Title('Your plan')] class extends Component
     <div class="space-y-8">
 
         {{-- ══════════════════════════════════════════════════════════════
+             WHERE CHECKOUT LANDS
+
+             All three endings of a purchase redirect here — approved,
+             still settling, and failed — so this is the only page on the
+             site where somebody finds out what happened to their money.
+             Before this block it said nothing at all, and a person who had
+             just paid arrived at a page showing their OLD plan with no
+             explanation.
+
+             Three messages and not one, because the three are genuinely
+             different and the middle one is the easy one to get wrong:
+             "we are checking" is not a failure, and must never be worded
+             as one. PayPal has the mandate; the webhook settles it within
+             seconds.
+             ══════════════════════════════════════════════════════════════ --}}
+        @if (session('checkout_done'))
+            <div class="flex items-start gap-3 rounded-card bg-success/10 p-5">
+                <span class="mt-0.5 grid size-8 shrink-0 place-items-center rounded-[11px] bg-success text-ink">
+                    <x-icon name="check" style="solid" class="text-xs" />
+                </span>
+                <div>
+                    <div class="text-[0.95rem] font-medium">{{ __('You are subscribed.') }}</div>
+                    <p class="mt-1 text-[0.86rem] leading-relaxed text-ink/60 dark:text-paper/60">
+                        {{ __('Downloads are unlimited from now on. PayPal will email you a receipt.') }}
+                    </p>
+                </div>
+            </div>
+        @elseif (session('checkout_pending'))
+            <div class="flex items-start gap-3 rounded-card bg-info/10 p-5">
+                <span class="mt-0.5 grid size-8 shrink-0 place-items-center rounded-[11px] bg-info text-white">
+                    <x-icon name="clock" style="solid" class="text-xs" />
+                </span>
+                <div>
+                    <div class="text-[0.95rem] font-medium">{{ __('PayPal is still confirming the payment.') }}</div>
+                    <p class="mt-1 text-[0.86rem] leading-relaxed text-ink/60 dark:text-paper/60">
+                        {{ __('This usually takes a few seconds. Reload this page in a moment — nothing further is needed from you, and you will not be charged twice.') }}
+                    </p>
+                </div>
+            </div>
+        @elseif (session('checkout_error'))
+            <div class="flex items-start gap-3 rounded-card bg-warning/10 p-5">
+                <span class="mt-0.5 grid size-8 shrink-0 place-items-center rounded-[11px] bg-warning text-ink">
+                    <x-icon name="triangle-exclamation" style="solid" class="text-xs" />
+                </span>
+                <div>
+                    <div class="text-[0.95rem] font-medium">{{ session('checkout_error') }}</div>
+                    <p class="mt-1 text-[0.86rem] leading-relaxed text-ink/60 dark:text-paper/60">
+                        {{ __('No payment was taken.') }}
+                    </p>
+                </div>
+            </div>
+        @endif
+
+        {{-- ══════════════════════════════════════════════════════════════
              WHAT YOU ARE ON
              ══════════════════════════════════════════════════════════════ --}}
         <div class="rounded-card bg-surface p-6 shadow-soft-md dark:bg-surface-dark">

@@ -27,6 +27,39 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        /*
+        | ── WHO IS ALLOWED TO REWRITE THE CLIENT'S ADDRESS ───────────────
+        |
+        | A tunnel (herd share / Expose, ngrok) runs ON THIS MACHINE and
+        | forwards to the local web server from 127.0.0.1, passing the real
+        | visitor's address and the original https scheme in X-Forwarded-*
+        | headers. Untrusted, Laravel ignores those headers: every visitor
+        | looks like 127.0.0.1, and — the part that breaks PayPal —
+        | isSecure() is false, so route() generates `http://` links for a
+        | site being served over https. PayPal is then handed an http
+        | return_url for an https page.
+        |
+        | ── WHY NOT at: '*' ──────────────────────────────────────────────
+        |
+        | Because '*' means "believe X-Forwarded-For from anybody", and in
+        | this application the client address is a security decision, not a
+        | log field: BlockIps refuses addresses, WatchTraffic rate-limits by
+        | address, and downloads are counted per address. Trusting the
+        | header globally would let any visitor claim to be any address —
+        | spoofing past a block, poisoning somebody else's rate limit, or
+        | inflating a download count. Several hours went into those counters
+        | being honest; this would undo it in one line.
+        |
+        | Localhost only is both sufficient and safe. A request that really
+        | arrives from 127.0.0.1 came from a process already on this machine
+        | — the tunnel client — and shared hosting in production has no
+        | proxy there, so the list is empty of effect where it is not needed.
+        */
+        $middleware->trustProxies(at: [
+            '127.0.0.1',
+            '::1',
+        ]);
+
         // Runs on every web request: enforces suspensions on sessions that
         // were already open, and keeps last_seen_at current.
         $middleware->web(append: [
@@ -67,8 +100,22 @@ return Application::configure(basePath: dirname(__DIR__))
         // URL is the credential, and the route does nothing but unsubscribe
         // the address it names — so this exception costs nothing and keeps
         // the one-click button working.
+        /*
+        | PayPal posts here from its own servers, with no session and no
+        | token — the same shape as the unsubscribe route above, and for the
+        | same reason: a machine is talking to us, not a browser.
+        |
+        | The credential is NOT the absence of CSRF, it is the signature.
+        | PayPalWebhookController asks PayPal to verify every body before it
+        | acts on a single field, and rejects everything when
+        | PAYPAL_WEBHOOK_ID is unset. Exempting this path without that check
+        | in place would be handing anybody who can POST JSON the ability to
+        | grant themselves Pro — which is why the two were written in the
+        | same commit and must never be separated.
+        */
         $middleware->validateCsrfTokens(except: [
             'unsubscribe/*',
+            'webhooks/paypal',
         ]);
 
         /*

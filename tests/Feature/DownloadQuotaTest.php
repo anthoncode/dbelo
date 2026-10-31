@@ -8,6 +8,7 @@ use App\Models\Sound;
 use App\Models\SoundFile;
 use App\Models\Subscription;
 use App\Models\User;
+use App\Support\Downloads;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -72,7 +73,56 @@ class DownloadQuotaTest extends TestCase
     {
         $sound = $this->publishedSound();
 
-        $this->get(route('sounds.download', $sound))->assertRedirect(route('login'));
+        $this->get(Downloads::url($sound))->assertRedirect(route('login'));
+    }
+
+    /**
+     * The URL cannot be constructed, only issued.
+     *
+     * This is the one that matters against a scraper. Every slug in the
+     * catalogue is published in the sitemap, so /sounds/{slug}/download was
+     * guessable for every sound at once — and the first 471 rows in the
+     * downloads table, none of them with an account, are what that cost.
+     *
+     * Asserting the REDIRECT and not a 403 on purpose: an expired link is
+     * almost always a person who left a tab open, and sending them to the
+     * sound page puts a fresh button under their cursor. The assertion is
+     * the behaviour, so a later change to 403 has to be a decision somebody
+     * makes rather than something that slips through.
+     */
+    public function test_an_unsigned_download_url_does_not_serve_the_file(): void
+    {
+        $user = User::factory()->create();
+        $sound = $this->publishedSound();
+
+        $this->actingAs($user)
+            ->get(route('sounds.download', $sound))
+            ->assertRedirect(route('sounds.show', $sound));
+
+        $this->assertSame(0, $user->fresh()->downloadsToday());
+        $this->assertSame(0, $sound->fresh()->downloads_count);
+    }
+
+    /**
+     * And an expired one behaves the same way.
+     *
+     * Travelling past Downloads::LINK_HOURS rather than hand-building a
+     * stale signature: the constant is the thing under test, so the test
+     * has to read it. Written out, the two would disagree the first time
+     * the window changed.
+     */
+    public function test_an_expired_download_link_sends_you_back_to_the_sound(): void
+    {
+        $user = User::factory()->create();
+        $sound = $this->publishedSound();
+
+        $url = Downloads::url($sound);
+
+        $this->travel(Downloads::LINK_HOURS + 1)->hours();
+
+        $this->actingAs($user)
+            ->get($url)
+            ->assertRedirect(route('sounds.show', $sound));
     }
 
     public function test_free_user_can_download_up_to_the_daily_limit(): void
@@ -81,7 +131,7 @@ class DownloadQuotaTest extends TestCase
 
         for ($i = 0; $i < 3; $i++) {
             $this->actingAs($user)
-                ->get(route('sounds.download', $this->publishedSound()))
+                ->get(Downloads::url($this->publishedSound()))
                 ->assertOk();
         }
 
@@ -93,11 +143,11 @@ class DownloadQuotaTest extends TestCase
         $user = User::factory()->create();
 
         for ($i = 0; $i < 3; $i++) {
-            $this->actingAs($user)->get(route('sounds.download', $this->publishedSound()));
+            $this->actingAs($user)->get(Downloads::url($this->publishedSound()));
         }
 
         $this->actingAs($user)
-            ->get(route('sounds.download', $this->publishedSound()))
+            ->get(Downloads::url($this->publishedSound()))
             ->assertStatus(429);
     }
 
@@ -115,7 +165,7 @@ class DownloadQuotaTest extends TestCase
 
         for ($i = 0; $i < 6; $i++) {
             $this->actingAs($user)
-                ->get(route('sounds.download', $this->publishedSound()))
+                ->get(Downloads::url($this->publishedSound()))
                 ->assertOk();
         }
     }
@@ -126,7 +176,7 @@ class DownloadQuotaTest extends TestCase
         $sound = $this->publishedSound(['is_premium' => true]);
 
         $this->actingAs($user)
-            ->get(route('sounds.download', $sound))
+            ->get(Downloads::url($sound))
             ->assertStatus(403);
     }
 
@@ -136,7 +186,7 @@ class DownloadQuotaTest extends TestCase
         $sound = $this->publishedSound(['status' => 'pending', 'published_at' => null]);
 
         $this->actingAs($user)
-            ->get(route('sounds.download', $sound))
+            ->get(Downloads::url($sound))
             ->assertNotFound();
     }
 
@@ -151,7 +201,7 @@ class DownloadQuotaTest extends TestCase
         $user = User::factory()->create();
         $sound = $this->publishedSound(['license_id' => $license->id]);
 
-        $this->actingAs($user)->get(route('sounds.download', $sound))->assertOk();
+        $this->actingAs($user)->get(Downloads::url($sound))->assertOk();
 
         // Terms change a year later...
         $license->update(['summary' => 'Completely different terms', 'version' => '2.0']);

@@ -148,6 +148,29 @@ new #[Layout('layouts.site')] #[Title('Sound effect pack')] class extends Compon
             ->get();
     }
 
+    /**
+     * What the zip would actually contain for whoever is looking.
+     *
+     * A pack has no premium flag of its own — it has premium_count — so
+     * the button has to describe the archive THIS visitor would get, not
+     * the pack. Saying "12 files" to somebody who would receive 8 is a
+     * button that lies, and they find out after the download.
+     *
+     * @return array{count: int, withheld: int, tooBig: bool}
+     */
+    #[Computed]
+    public function archive(): array
+    {
+        $service = app(\App\Services\PackArchive::class);
+        $available = $service->available($this->pack, auth()->user());
+
+        return [
+            'count' => $available->count(),
+            'withheld' => $service->withheld($this->pack, auth()->user()),
+            'tooBig' => $available->count() > \App\Services\PackArchive::MAX_SOUNDS,
+        ];
+    }
+
     /** Total running time, which is what a buyer actually wants to know. */
     #[Computed]
     public function totalDuration(): string
@@ -262,7 +285,58 @@ new #[Layout('layouts.site')] #[Title('Sound effect pack')] class extends Compon
                     {{ $this->totalDuration }} in total
                 </span>
 
-                <div class="ml-auto">
+                <div class="ml-auto flex items-center gap-3">
+                    {{--
+                        The whole pack, as one zip.
+
+                        The label counts what THIS visitor would receive,
+                        not what the pack holds. A pack has no premium flag
+                        — it has premium_count — so somebody without a plan
+                        looking at a pack of twelve with four paid ones sees
+                        "Download 8 sounds", and the line underneath says
+                        what the other four need. Saying "12" and shipping
+                        8 is a button that lies and only admits it after the
+                        download.
+
+                        Nothing is hidden when there is nothing to give
+                        either: the button still appears and leads to the
+                        plans page, because that case is an offer rather
+                        than an error. See PackDownloadController.
+
+                        The link is signed and lasts twelve hours. A pack
+                        URL is worth more to a scraper than a sound's — one
+                        request, the entire curated set — so this is the one
+                        that most needed it.
+                    --}}
+                    @if ($this->archive['tooBig'])
+                        <span class="flex items-center gap-2 text-[0.83rem] text-paper/45"
+                              title="Over {{ \App\Services\PackArchive::MAX_SOUNDS }} files a single browser download has no realistic chance of finishing, and there is no resume.">
+                            <x-icon name="circle-info" style="regular" class="text-[0.78rem]" />
+                            Too large for one archive — take the sounds you need
+                        </span>
+                    @elseif ($this->archive['count'] > 0)
+                        <div class="text-right">
+                            <a href="{{ \App\Support\Downloads::packUrl($pack) }}"
+                               class="inline-flex items-center gap-2.5 rounded-full bg-action px-6 py-3 font-medium text-white shadow-soft-md transition duration-300 ease-dbelo hover:-translate-y-0.5">
+                                <x-icon name="file-zipper" style="solid" class="text-sm" />
+                                Download {{ $this->archive['count'] }} {{ Str::plural('sound', $this->archive['count']) }}
+                            </a>
+
+                            @if ($this->archive['withheld'] > 0)
+                                <p class="mt-2 text-[0.78rem] text-paper/45">
+                                    {{ $this->archive['withheld'] }} more
+                                    {{ $this->archive['withheld'] === 1 ? 'needs' : 'need' }} a subscription
+                                </p>
+                            @endif
+                        </div>
+                    @else
+                        <a href="{{ \App\Support\Downloads::packUrl($pack) }}"
+                           class="inline-flex items-center gap-2.5 rounded-full bg-paper/10 px-6 py-3 font-medium text-paper/70 transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:text-paper">
+                            <x-icon name="crown" style="solid" class="text-sm" />
+                            Subscribe to download this pack
+                        </a>
+                    @endif
+
                     <x-share-menu :url="route('packs.show', $pack)" :title="$pack->name" tone="dark" />
                 </div>
             </div>

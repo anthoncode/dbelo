@@ -624,10 +624,19 @@ new #[Layout('layouts.site')] class extends Component {
                              straight back and the page appeared to do
                              nothing at all.
 
-                             There is no checkout yet: PayPal is not
-                             connected and no purchase route exists. Rather
-                             than a button that pretends, each case gets the
-                             truest destination available today. --}}
+                             Then there was no checkout at all, and a
+                             signed-in visitor was sent to /settings/plan,
+                             which offers a link back to this section — a
+                             loop with no way out. That is what the form
+                             below replaces.
+
+                             A FORM, NOT A LINK, for the paid plans.
+                             Submitting it creates a real subscription at
+                             PayPal; a link would be fetched by prefetchers
+                             and crawlers and twice by anyone who
+                             double-clicks, each one a dangling unapproved
+                             subscription. The free plan stays a link,
+                             because choosing it buys nothing. --}}
                         @if ($this->currentPlanId === $plan->id)
                             {{-- Not a link. Offering somebody the plan they
                                  are already on is the clearest sign a page
@@ -636,6 +645,29 @@ new #[Layout('layouts.site')] class extends Component {
                                 <x-icon name="circle-check" style="solid" class="text-[0.78rem]" />
                                 Your plan
                             </div>
+                        @elseif (auth()->check() && $plan->isRecurring())
+                            {{-- The real thing. Disabled only when the plan
+                                 has no twin at PayPal yet: a button that
+                                 starts a checkout for a plan nobody can be
+                                 billed for fails on PayPal's own screen,
+                                 which is the worst place to discover it. --}}
+                            @if ($plan->isSyncedWithPayPal())
+                                <form method="POST" action="{{ route('checkout.start', $plan) }}" class="mt-7">
+                                    @csrf
+                                    <button type="submit"
+                                            @class([
+                                                'block w-full rounded-full py-3 text-center text-[0.88rem] font-medium transition duration-300 ease-dbelo hover:-translate-y-0.5',
+                                                'bg-brand text-white shadow-brand hover:shadow-brand-lg' => $isPopular,
+                                                'bg-ink/[0.05] text-ink/70 hover:bg-ink/[0.09] dark:bg-paper/[0.08] dark:text-paper/70' => ! $isPopular,
+                                            ])>
+                                        Subscribe to {{ $plan->name }}
+                                    </button>
+                                </form>
+                            @else
+                                <div class="mt-7 block rounded-full bg-ink/[0.04] py-3 text-center text-[0.88rem] text-ink/40 dark:bg-paper/[0.06] dark:text-paper/40">
+                                    Not available yet
+                                </div>
+                            @endif
                         @else
                             <a href="{{ auth()->check() ? route('plan.show') : route('register') }}" wire:navigate
                                @class([
