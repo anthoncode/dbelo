@@ -210,12 +210,72 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
     // Subscription & download quota
     // ---------------------------------------------------------------
 
+    /**
+     * The subscription this account is actually living under right now.
+     *
+     * ── WHY AN ACCOUNT CAN HAVE TWO AT ONCE ─────────────────────────────
+     *
+     * Because a day pass and a Pro subscription are both rows in this table,
+     * and buying Pro does not end a pass that was already paid for. Somebody
+     * who buys a pass at ten and subscribes at noon genuinely holds two:
+     * one running for 24 hours, one running until cancelled.
+     *
+     * Ending the pass on the spot would be tidier in the database and would
+     * take away hours they paid for — which is the thing this whole module
+     * refuses to do everywhere else, most explicitly in the difference
+     * SubscriptionEvents draws between CANCELLED and EXPIRED.
+     *
+     * ── SO WHICH ONE WINS, AND WHY NOT THE NEWEST ───────────────────────
+     *
+     * This used to be `latest('starts_at')`: most recently started wins. It
+     * gave the right answer for the only case anybody had tried, because Pro
+     * is always bought after the pass — and it was right by accident.
+     *
+     * The other direction is where it bites. A pass granted by hand in the
+     * admin to somebody who already has Pro, a start_time that arrives out
+     * of order from PayPal, a correction made in the database: any of those
+     * leaves the pass as the newest row, and a Pro subscriber silently drops
+     * from unlimited downloads to fifty a day. Nothing would flag it,
+     * because the method did exactly what it said.
+     *
+     * So the rule is THE MOST GENEROUS WINS, and the order below is the
+     * order those words mean:
+     *
+     *   1. unlimited before limited   (daily_download_limit IS NULL)
+     *   2. premium before not         (allows_premium)
+     *   3. the larger allowance       (a 200/day plan over a 50/day pass)
+     *   4. the newest, as a tiebreak  (two equal plans — take the fresher)
+     *
+     * Under this rule a paid plan can never lose to a lesser one, whatever
+     * order the rows arrived in. Being wrong in this direction costs a
+     * support message; being wrong the other way takes away what somebody
+     * bought, and nobody finds out.
+     *
+     * ── WHY THE JOIN ────────────────────────────────────────────────────
+     *
+     * The ranking lives on `plans`, so it has to be ordered in SQL rather
+     * than sorted in PHP: sorting after ->get() would mean loading every
+     * active subscription on every permission check, and this method is on
+     * the path of every single download.
+     *
+     * The select() is not decoration either — without it the joined plan
+     * columns overwrite the subscription's own id, and the row that comes
+     * back is a Subscription wearing a Plan's id.
+     */
     public function activeSubscription(): ?Subscription
     {
         return $this->subscriptions()
             ->active()
+            ->join('plans', 'plans.id', '=', 'subscriptions.plan_id')
+            ->select('subscriptions.*')
             ->with('plan')
-            ->latest('starts_at')
+            // NULL means unlimited, and in MySQL NULLs sort first ascending —
+            // which is the order wanted here, so it is left explicit rather
+            // than relied upon silently.
+            ->orderByRaw('(plans.daily_download_limit IS NULL) DESC')
+            ->orderByDesc('plans.allows_premium')
+            ->orderByDesc('plans.daily_download_limit')
+            ->orderByDesc('subscriptions.starts_at')
             ->first();
     }
 
