@@ -295,14 +295,27 @@ class OrderEvents
             return;
         }
 
-        // custom_id is on the capture; fall back to the order's purchase unit
-        // for the shapes where PayPal omits it.
-        $source = filled($capture['custom_id'] ?? null)
-            ? $capture
-            : (array) (($order['purchase_units'][0] ?? []) ?: []);
+        /*
+         * ── THE TWO IDENTIFIERS LIVE ON DIFFERENT OBJECTS ───────────────
+         *
+         * This used to choose ONE source for BOTH facts: if the capture
+         * carried custom_id, read everything from the capture. It does carry
+         * custom_id — and PayPal's capture schema has no reference_id at all.
+         * So every purchase knew WHO had paid and not WHAT they had bought,
+         * and landed in orphan(): money taken, nothing granted, a row marked
+         * `pending` and a buyer still on the free plan.
+         *
+         *   capture        custom_id ✓   reference_id ✗
+         *   purchase_unit  custom_id ✓   reference_id ✓
+         *
+         * Each field is now looked up wherever it actually is, falling back
+         * per FIELD rather than per source.
+         */
+        $unit = (array) (($order['purchase_units'][0] ?? []) ?: []);
 
-        $user = $this->userFrom($source);
-        $plan = $this->planFrom($source);
+        $user = $this->userFrom($capture) ?? $this->userFrom($unit);
+        $plan = $this->planFrom($capture) ?? $this->planFrom($unit);
+        $source = $capture + $unit;
 
         if (! $user || ! $plan) {
             /*
@@ -460,9 +473,40 @@ class OrderEvents
      */
     protected function userFrom(array $resource): ?User
     {
-        $id = (int) ($resource['custom_id'] ?? 0);
+        $id = (int) self::customPart($resource, 0);
 
         return $id > 0 ? User::find($id) : null;
+    }
+
+    /**
+     * One field, two facts, and the reason is the webhook.
+     *
+     * custom_id is written as "<user id>:<plan slug>" — see
+     * PassCheckoutController::start(). It looks redundant next to
+     * reference_id, which also carries the slug, and it is not:
+     *
+     * PAYMENT.CAPTURE.COMPLETED arrives with NOTHING but the capture, and a
+     * capture has no reference_id. Without the slug riding along in
+     * custom_id, that event can identify the buyer and not the purchase, and
+     * the webhook — the safety net for the abandoned tab and for a capture
+     * call that timed out — would file every payment it rescued as an
+     * orphan. Exactly the failure this method was written to end.
+     *
+     * Index 0 is the user, index 1 the slug. A value with no colon is an
+     * older purchase, from before this existed: the whole string is the user
+     * id and the plan is found from reference_id instead. That fallback is
+     * not politeness — there are already paid captures in the wild carrying
+     * the old shape.
+     */
+    protected static function customPart(array $resource, int $index): string
+    {
+        $custom = trim((string) ($resource['custom_id'] ?? ''));
+
+        if ($custom === '') {
+            return '';
+        }
+
+        return trim(explode(':', $custom)[$index] ?? '');
     }
 
     /**
@@ -476,13 +520,24 @@ class OrderEvents
      */
     protected function planFrom(array $resource): ?Plan
     {
-        $slug = trim((string) ($resource['reference_id'] ?? ''));
+        // custom_id first: it is the only one of the two that survives onto
+        // a bare PAYMENT.CAPTURE.COMPLETED event. reference_id second, for
+        // purchase units and for captures made before custom_id carried the
+        // slug.
+        foreach ([self::customPart($resource, 1), trim((string) ($resource['reference_id'] ?? ''))] as $slug) {
+            // 'default' is what PayPal puts in reference_id when the request
+            // did not set one. It is not a plan, and looking it up would
+            // either miss or — worse — match a plan somebody named that.
+            if ($slug === '' || $slug === 'default') {
+                continue;
+            }
 
-        if ($slug === '' || $slug === 'default') {
-            return null;
+            if ($plan = Plan::where('slug', $slug)->first()) {
+                return $plan;
+            }
         }
 
-        return Plan::where('slug', $slug)->first();
+        return null;
     }
 
     /**

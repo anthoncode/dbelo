@@ -129,13 +129,25 @@ class PassCheckoutController extends Controller
                     'reference_id' => $plan->slug,
 
                     /*
-                     * OUR user id, travelling to PayPal and back. The only
-                     * identifier in the exchange that was ours before PayPal
-                     * touched it. Matching on the payer's email instead would
-                     * attach the pass to whoever owns that address, which is
-                     * not necessarily the person who just paid.
+                     * OUR user id AND the plan slug, travelling together.
+                     *
+                     * The id is the only identifier in the exchange that was
+                     * ours before PayPal touched it. Matching on the payer's
+                     * email instead would attach the pass to whoever owns
+                     * that address, which is not necessarily the person who
+                     * just paid.
+                     *
+                     * The slug looks redundant beside reference_id above, and
+                     * is not. PayPal copies custom_id onto the CAPTURE and
+                     * does not copy reference_id — a capture object has no
+                     * such field. So a PAYMENT.CAPTURE.COMPLETED webhook,
+                     * which arrives carrying nothing but the capture, could
+                     * tell who paid and not what for, and filed the payment
+                     * as an orphan: money taken, nothing granted.
+                     *
+                     * One field, both facts, in every shape PayPal sends.
                      */
-                    'custom_id' => (string) $user->id,
+                    'custom_id' => $user->id.':'.$plan->slug,
 
                     // Shown on PayPal's screen and on the buyer's statement.
                     'description' => mb_substr($plan->name.' — '.config('app.name'), 0, 127),
