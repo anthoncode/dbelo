@@ -196,10 +196,54 @@ new #[Layout('layouts.site')] #[Title('Your plan')] class extends Component
                 <span class="mt-0.5 grid size-8 shrink-0 place-items-center rounded-[11px] bg-success text-ink">
                     <x-icon name="check" style="solid" class="text-xs" />
                 </span>
+                {{-- ── READ FROM THE PLAN, NOT WRITTEN BY HAND ──────────
+                     This said "You are subscribed. Downloads are unlimited
+                     from now on." for every purchase, because when it was
+                     written a purchase could only be a subscription. Buy
+                     the day pass and it lied twice over: nothing was
+                     subscribed, and the allowance is fifty a day, not
+                     unlimited.
+
+                     At the exact moment somebody has just paid, which is
+                     the worst place in the application to be wrong.
+
+                     Derived from the plan now, so a plan added next year
+                     cannot drift away from the sentence describing it. --}}
+                @php
+                    $bought = $this->plan;
+                    $until = $this->subscription?->ends_at;
+                @endphp
+
                 <div>
-                    <div class="text-[0.95rem] font-medium">{{ __('You are subscribed.') }}</div>
+                    <div class="text-[0.95rem] font-medium">
+                        @if ($bought?->isOneOff())
+                            {{ __('Your :plan is active.', ['plan' => $bought->name]) }}
+                        @else
+                            {{ __('You are subscribed.') }}
+                        @endif
+                    </div>
+
                     <p class="mt-1 text-[0.86rem] leading-relaxed text-ink/60 dark:text-paper/60">
-                        {{ __('Downloads are unlimited from now on. PayPal will email you a receipt.') }}
+                        {{-- The allowance, in the plan's own words. --}}
+                        @if ($bought?->isUnlimited())
+                            {{ __('Downloads are unlimited') }}
+                        @elseif ($bought)
+                            {{ __(':count downloads a day', ['count' => $bought->daily_download_limit]) }}
+                        @else
+                            {{ __('Your plan is active') }}
+                        @endif
+
+                        {{-- A pass ends on a date, and that date is the most
+                             useful fact about it. A subscription has no end,
+                             and inventing one would be the same mistake in
+                             the other direction. --}}
+                        @if ($bought?->isOneOff() && $until)
+                            — {{ __('until :when', ['when' => $until->isoFormat('D MMM, HH:mm')]) }}.
+                        @else
+                            {{ __('from now on.') }}
+                        @endif
+
+                        {{ __('PayPal will email you a receipt.') }}
                     </p>
                 </div>
             </div>
