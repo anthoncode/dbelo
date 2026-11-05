@@ -287,7 +287,30 @@ class PayPalClient
                     ->connectTimeout($this->connectTimeout())
                     ->send($method, $url, $method === 'GET'
                         ? ['query' => $payload]
-                        : ['json' => $payload]),
+                        /*
+                         * `{}`, not `[]`, when there is nothing to send.
+                         *
+                         * PHP uses one type for both of JSON's containers, so
+                         * an empty array is ambiguous — and json_encode()
+                         * resolves it to `[]`, a JSON ARRAY. PayPal reads a
+                         * request body as an object and answers:
+                         *
+                         *   400 INVALID_REQUEST → (body) [MALFORMED_REQUEST_JSON]
+                         *
+                         * Which is exactly what happened to every capture:
+                         * /v2/checkout/orders/{id}/capture takes no fields, so
+                         * it was called with [], and PayPal refused the body
+                         * before looking at the order. The buyer approved, the
+                         * money never moved, and the page said "still
+                         * confirming" — truthfully, and forever.
+                         *
+                         * Fixed here rather than at the call site because the
+                         * ambiguity belongs to the serialisation, not to the
+                         * caller: any endpoint invoked with no fields would
+                         * have hit it, and the next one would have been found
+                         * the same expensive way.
+                         */
+                        : ['json' => $payload === [] ? new \stdClass : $payload]),
                 $method,
                 $path,
                 $retryable && $attempt <= self::MAX_RETRIES,
