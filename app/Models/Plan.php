@@ -160,7 +160,29 @@ class Plan extends Model
      * extends from the existing end instead of from now. See
      * OrderEvents::grant().
      */
-    public function passEndsAt(?\Illuminate\Support\Carbon $from = null): \Illuminate\Support\Carbon
+    /*
+     * ── CarbonInterface, NOT Illuminate\Support\Carbon ──────────────────
+     *
+     * This application uses immutable dates, so a datetime cast hands back a
+     * CarbonImmutable — and the narrower hint rejected it:
+     *
+     *   TypeError: passEndsAt(): Argument #1 ($from) must be of type
+     *   ?Illuminate\Support\Carbon, Carbon\CarbonImmutable given
+     *
+     * Which is not a theoretical tidiness problem. $from is only ever
+     * non-null when somebody already holds a live pass, so this was the
+     * stacking path: the SECOND pass anybody bought while one was running
+     * would have thrown, in production, after taking their money.
+     *
+     * CarbonInterface is what both classes implement, and it is what a
+     * method that only reads a date and adds to it actually needs.
+     *
+     * The body works under either kind without a change: addDay() mutates
+     * and returns $this on the mutable one and returns a new instance on the
+     * immutable one, and this returns that value rather than relying on the
+     * variable having changed.
+     */
+    public function passEndsAt(?\Carbon\CarbonInterface $from = null): \Carbon\CarbonInterface
     {
         $from = ($from ?? now())->copy();
 
