@@ -473,9 +473,43 @@ class OrderEvents
      */
     protected function userFrom(array $resource): ?User
     {
-        $id = (int) self::customPart($resource, 0);
+        $id = self::userIdFrom($resource);
 
         return $id > 0 ? User::find($id) : null;
+    }
+
+    /* ─────────────────────────────────────────────────────────────────────
+     | custom_id: ONE definition, one writer, three readers.
+     |
+     | This block exists because of a bug it would have prevented. The format
+     | changed from "<id>" to "<id>:<slug>" in the method that WRITES it, and
+     | the checkout's return handler — which compares custom_id against the
+     | signed-in user to stop somebody claiming another buyer's order — went
+     | on comparing the whole string to a bare id. They never matched again,
+     | so every purchase was refused as "an order belonging to somebody
+     | else", before the money was taken.
+     |
+     | A format known by more than one place is a format that will be changed
+     | in one of them. So nothing outside here may split the string, and
+     | nothing outside here may build it.
+     ───────────────────────────────────────────────────────────────────── */
+
+    /** Build it. The only place that decides what the format is. */
+    public static function customId(User $user, Plan $plan): string
+    {
+        return $user->id.':'.$plan->slug;
+    }
+
+    /** Which of our users paid. 0 when the field is absent or unreadable. */
+    public static function userIdFrom(array $resource): int
+    {
+        return (int) self::customPart($resource, 0);
+    }
+
+    /** Which plan was bought. '' on the older two-field-less shape. */
+    public static function planSlugFrom(array $resource): string
+    {
+        return self::customPart($resource, 1);
     }
 
     /**
@@ -524,7 +558,7 @@ class OrderEvents
         // a bare PAYMENT.CAPTURE.COMPLETED event. reference_id second, for
         // purchase units and for captures made before custom_id carried the
         // slug.
-        foreach ([self::customPart($resource, 1), trim((string) ($resource['reference_id'] ?? ''))] as $slug) {
+        foreach ([self::planSlugFrom($resource), trim((string) ($resource['reference_id'] ?? ''))] as $slug) {
             // 'default' is what PayPal puts in reference_id when the request
             // did not set one. It is not a plan, and looking it up would
             // either miss or — worse — match a plan somebody named that.

@@ -147,7 +147,7 @@ class PassCheckoutController extends Controller
                      *
                      * One field, both facts, in every shape PayPal sends.
                      */
-                    'custom_id' => $user->id.':'.$plan->slug,
+                    'custom_id' => OrderEvents::customId($user, $plan),
 
                     // Shown on PayPal's screen and on the buyer's statement.
                     'description' => mb_substr($plan->name.' — '.config('app.name'), 0, 127),
@@ -235,7 +235,17 @@ class PassCheckoutController extends Controller
 
         $unit = (array) ($order['purchase_units'][0] ?? []);
 
-        if ((string) ($unit['custom_id'] ?? '') !== (string) $user->id) {
+        /*
+         * Read through OrderEvents, never by splitting the string here.
+         *
+         * This line used to be a direct comparison of the whole custom_id
+         * against the user id. When the format gained the plan slug —
+         * "4:day-pass" — the writer changed and this reader did not, so it
+         * refused every genuine purchase as somebody else's. Nothing was
+         * charged, which is the one mercy: the check runs before the
+         * capture. But nobody could buy a pass at all.
+         */
+        if (OrderEvents::userIdFrom($unit) !== (int) $user->id) {
             Log::warning('Pass return with an order belonging to somebody else', [
                 'user' => $user->id,
                 'order' => $orderId,
