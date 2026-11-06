@@ -23,3 +23,28 @@
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteRule ^ index.php [L]
 </IfModule>
+
+# ── WHY A cPanel BLOCK LIVES IN VERSION CONTROL ────────────────────────
+#
+# cPanel wrote the block below on the server, and it is not decoration: it
+# is what makes Apache run this site on PHP 8.3 instead of the host's
+# default, which is 7.4 and cannot run the application at all.
+#
+# It is committed here rather than left as an untracked local edit for one
+# reason: public/.htaccess is a TRACKED file. A server-side modification to
+# a tracked file means the next `git pull` that touches this file aborts
+# with "your local changes would be overwritten" — a deployment that fails
+# at the worst time, over a change nobody remembers making.
+#
+# Herd serves the site through nginx locally and ignores .htaccess
+# entirely, so this is inert on the Mac.
+#
+# If cPanel ever rewrites it, `bin/deploy.sh` will report the file as
+# modified again, and that report will mean something.
+
+# php -- BEGIN cPanel-generated handler, do not edit
+# Set the “ea-php83” package as the default “PHP” programming language.
+<IfModule mime_module>
+  AddHandler application/x-httpd-ea-php83 .php .php8 .phtml
+</IfModule>
+# php -- END cPanel-generated handler, do not edit
