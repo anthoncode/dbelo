@@ -1,5 +1,6 @@
 <?php
 
+use App\Console\Commands\FetchPayPalEventsCommand;
 use App\Console\Commands\RollupStatsCommand;
 use App\Console\Commands\RunBackupCommand;
 use App\Console\Commands\SendDigestCommand;
@@ -60,6 +61,33 @@ Schedule::command(RollupStatsCommand::class)
 | window rather than whenever somebody happens to upload something.
 */
 Schedule::job(new QueueHeartbeat)->everyFiveMinutes();
+
+/*
+| Collecting PayPal events that the webhook did not bring.
+|
+| The webhook endpoint is the designed path and it demonstrably works: an
+| external POST to it answers 200 and lands a row. PayPal's own events still
+| do not arrive — a BILLING.SUBSCRIPTION.ACTIVATED for a real subscription
+| sits readable in their API while the endpoint never saw a request, and an
+| explicit resend changed nothing.
+|
+| PayPal gives up retrying after three days. After that the event stays in
+| their API for ever, unprocessed, and the money it represents is never
+| recorded — not the first charge, and not any RENEWAL after it.
+|
+| So this goes and gets them. Every ten minutes rather than every minute:
+| nothing here is urgent to the second (the buyer already has their plan,
+| granted by the checkout return), and a scheduled API call that runs 1,440
+| times a day to find nothing is rude to somebody else's service.
+|
+| withoutOverlapping because a slow run must not have a second one reading
+| the same window behind it. The duplicate guard would hold, but two
+| processes racing on the same events is a thing to avoid rather than
+| survive.
+*/
+Schedule::command(FetchPayPalEventsCommand::class)
+    ->everyTenMinutes()
+    ->withoutOverlapping();
 
 /*
 | Pruning the activity log.
