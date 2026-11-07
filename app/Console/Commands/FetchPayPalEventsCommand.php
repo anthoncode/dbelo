@@ -58,6 +58,16 @@ use Throwable;
  */
 class FetchPayPalEventsCommand extends Command
 {
+    /**
+     * What a row written by this command is stamped with.
+     *
+     * A constant so that the writer here and any reader anywhere else
+     * cannot drift apart — the same lesson custom_id taught, at the cost of
+     * an afternoon: a format known by two places is a format that will be
+     * changed in one of them.
+     */
+    public const SOURCE = 'api_poll';
+
     protected $signature = 'paypal:fetch-events
                             {--hours=72 : How far back to look}
                             {--limit=50 : Most events to pull in one run}
@@ -159,7 +169,30 @@ class FetchPayPalEventsCommand extends Command
                 'verified' => true,
                 'status' => WebhookEvent::PENDING,
                 'resource_id' => $payload['resource']['id'] ?? null,
-                'payload' => $payload,
+                /*
+                 * Stamped with where it came from.
+                 *
+                 * There are now THREE ways an event reaches this table —
+                 * delivered to the webhook URL by PayPal, captured by our
+                 * own checkout return, and pulled by this command — and the
+                 * stored payload looks identical for the first and the
+                 * third, because both are PayPal's own event object.
+                 *
+                 * Without this marker the origin is unknowable, and the
+                 * first diagnostic written after this command shipped got it
+                 * wrong: it assumed anything that was not 'checkout_return'
+                 * had been delivered, and so reported events this very
+                 * command had fetched as proof that deliveries were working.
+                 *
+                 * That question matters. "Is PayPal delivering?" is the
+                 * difference between a healthy integration and one running
+                 * entirely on its safety net.
+                 *
+                 * A sibling key rather than a column, matching what
+                 * PassCheckoutController already does, and harmless to the
+                 * handlers — they read payload['resource'] and nothing else.
+                 */
+                'payload' => $payload + ['source' => self::SOURCE],
             ]);
 
             // Null means the webhook already delivered it, or an earlier run
