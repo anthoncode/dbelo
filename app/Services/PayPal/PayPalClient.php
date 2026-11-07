@@ -23,10 +23,19 @@ use Throwable;
  *  1. The secret never leaves it. Not into a log line, not into an exception
  *     message, not into an error report. See maskedContext().
  *
- *  2. Sandbox by default. mode() treats anything that is not the exact
- *     string 'live' as sandbox. A typo in .env — PAYPAL_MODE=Live, =prod,
- *     =1 — must fail towards "no real money moved", never towards charging
- *     somebody's card from a laptop.
+ *  2. Sandbox by default. mode() returns live ONLY for the word "live",
+ *     in any capitalisation; everything else — =prod, =production, =1,
+ *     =true, empty, missing — is sandbox. The asymmetry is the point: a
+ *     value nobody chose must fail towards "no real money moved", never
+ *     towards charging somebody's card from a laptop.
+ *
+ *     This paragraph used to claim that PAYPAL_MODE=Live was sandbox too,
+ *     and the code had always lowercased, so it was not. A test written
+ *     months later found the contradiction — on the most safety-critical
+ *     line in the file, where a comment somebody trusts is worse than no
+ *     comment at all. The code was left alone and this was corrected:
+ *     nobody writes "LIVE" meaning sandbox, so capitalisation is not the
+ *     typo worth defending against.
  *
  *  3. Tokens are cached, and the cache key includes the credentials. PayPal
  *     tokens last around nine hours; fetching one per request would triple
@@ -81,10 +90,13 @@ class PayPalClient
     /* ═══════════════════════════ Configuration ═══════════════════════════ */
 
     /**
-     * 'sandbox' unless .env says exactly 'live'.
+     * 'sandbox' unless .env says "live", whatever its capitalisation.
      *
      * See the note at the top: this asymmetry is intentional and is the
-     * single most important line in the file.
+     * single most important line in the file. Any value that is not the
+     * word "live" — including ones that plainly mean it, like 'prod' or
+     * '1' — is sandbox, because guessing at intent here is guessing about
+     * whether to charge a real card.
      */
     public function mode(): string
     {
