@@ -79,10 +79,7 @@ class DownloadController extends Controller
          * signature, and the failure would look like the feature being
          * broken rather than a parameter being appended.
          */
-        if (! $request->hasValidSignature(ignoreQuery: [
-            'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term',
-            'gclid', 'fbclid', 'ref',
-        ])) {
+        if (! Downloads::signatureIsValid($request)) {
             return redirect()->route('sounds.show', $sound);
         }
 

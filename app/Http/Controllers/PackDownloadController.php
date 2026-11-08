@@ -50,10 +50,7 @@ class PackDownloadController extends Controller
         // issued on a page, not constructed from a slug. A pack URL is
         // worth more to a scraper than a sound's — one request, the whole
         // set — so this matters here most.
-        if (! $request->hasValidSignature(ignoreQuery: [
-            'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term',
-            'gclid', 'fbclid', 'ref',
-        ])) {
+        if (! Downloads::signatureIsValid($request)) {
             return redirect()->route('packs.show', $pack);
         }
 

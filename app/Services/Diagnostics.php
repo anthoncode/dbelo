@@ -242,12 +242,23 @@ class Diagnostics
             'age' => $age,
             'loud' => $loud,
             /*
-             * WARN until it has been behind for a day, and never worse than
-             * WARN on a server. See the note above on checkout mtimes: a
-             * FAIL there would state more certainty than this comparison
-             * has.
+             * Three outcomes, and only one of them is a guess.
+             *
+             *   never built  FAIL anywhere. A missing manifest is a fact,
+             *                not an inference from a timestamp, and it
+             *                means the site is serving no CSS at all.
+             *   behind 0     OK. On a server that is now always the case —
+             *                see assetsBehind() for why a timestamp cannot
+             *                answer this there, and why pretending it can
+             *                left a false alarm on screen for eight days.
+             *   otherwise    local drift. FAIL once it has been a day.
              */
-            'status' => $loud && ! $production ? self::FAIL : self::WARN,
+            'status' => match (true) {
+                $never => self::FAIL,
+                $behind === 0 => self::OK,
+                $loud => self::FAIL,
+                default => self::WARN,
+            },
             'fix' => $production
                 ? 'Any CSS class written since then does not exist in this build, so those elements render with no styling at all — and nothing fails, so nothing is logged. There is no Node on this server: compile on the development machine and let public/build travel with the deploy. After a deploy that carries public/build every mtime here is the checkout time, so this check reads fresh whether the CSS matches or not — building before the commit is the only real guarantee.'
                 : 'Any CSS class written since then does not exist in the build, so those elements render unstyled — with no error anywhere. Vite is not watching: start it and this stops happening after every change.',
@@ -272,12 +283,22 @@ class Diagnostics
              * and this file exists because of what happened the last time
              * the banner knew something of its own.
              */
-            'headline' => $production
-                ? 'This deploy did not bring a fresh build.'
-                : 'The styles have not been rebuilt.',
-            'detail' => $production
-                ? 'Anything written since then renders with no CSS at all — not broken, unpainted. Build on your machine and let public/build travel with the deploy.'
-                : 'Anything written since then renders with no CSS at all — not broken, unpainted. Run ./dev.sh and leave it running.',
+            'headline' => match (true) {
+                $never => 'There is no compiled build on this server.',
+                $production => 'Compiled assets travel with the deploy.',
+                default => 'The styles have not been rebuilt.',
+            },
+            'detail' => match (true) {
+                $never => 'public/build is missing entirely, so every page is being served with no CSS. It is committed to the repository on purpose — check that the last deploy actually carried it.',
+                /*
+                 * Shown on the Details page, never as a banner: with
+                 * behind at 0 the banner does not render at all. It is
+                 * here so that somebody looking for this check finds an
+                 * explanation rather than an empty row.
+                 */
+                $production => 'Whether they match the current Blade files cannot be told from this server: git only rewrites a file whose content changed, so an unchanged manifest keeps an old date while the views it still fits carry today\'s. The guarantee is bin/ship.sh, which compiles before every commit.',
+                default => 'Anything written since then renders with no CSS at all — not broken, unpainted. Run ./dev.sh and leave it running.',
+            },
         ];
     }
 
@@ -297,8 +318,46 @@ class Diagnostics
 
             $manifest = public_path('build/manifest.json');
 
+            /*
+             * No manifest at all. The one thing an mtime cannot lie about,
+             * and it is true on any machine: nothing was ever compiled.
+             */
             if (! file_exists($manifest)) {
                 return PHP_INT_MAX;
+            }
+
+            /*
+             * ── ON A SERVER THIS COMPARISON IS NOT MERELY NOISY ──────────
+             *
+             * It is backwards, and that took eight days of a false alarm
+             * across the top of every admin page to see.
+             *
+             * Git only writes a file whose CONTENT changed. Vite names its
+             * output by content hash, so a day of editing Blade files that
+             * introduced no new CSS produces a byte-identical manifest —
+             * which `git pull` therefore does not touch, leaving its mtime
+             * at whenever the CSS last genuinely changed. The Blade files
+             * it DID rewrite all carry today's date.
+             *
+             * So the gap this measures grows precisely while nothing is
+             * wrong, and the sentence it prints — "this deploy did not
+             * bring a fresh build" — is the opposite of what an old
+             * manifest means here. An unchanged manifest after a pull is
+             * evidence that the compiled output still matches.
+             *
+             * The docblock above anticipated the mtime problem and guessed
+             * the wrong direction: it warned that this might reassure
+             * falsely. It alarms falsely instead, which is worse, because a
+             * banner that is always on is a banner nobody reads — the exact
+             * failure this check was rewritten once already to avoid.
+             *
+             * There is no honest mtime answer on a deployed checkout, so
+             * this stops pretending to have one. The guarantee lives in
+             * bin/ship.sh, which compiles before every commit, and that is
+             * what assetsReport() says here instead.
+             */
+            if (app()->isProduction()) {
+                return 0;
             }
 
             $behind = $this->newestSourceTime() - filemtime($manifest);

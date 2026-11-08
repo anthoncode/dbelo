@@ -279,4 +279,53 @@ class Downloads
             ['pack' => $pack->slug],
         );
     }
+
+    /**
+     * Parameters a shared link may pick up without breaking its signature.
+     *
+     * A signature covers the whole query string, so a link that someone
+     * pastes into a campaign tool, or that a social network decorates on
+     * the way, arrives with extra parameters and fails verification. The
+     * failure then looks like the download being broken rather than like a
+     * parameter having been appended — and the person who sees it is
+     * somebody who was about to get a file.
+     *
+     * Analytics and referral tags only. Nothing here is read by the
+     * application, so ignoring them cannot change what is served.
+     */
+    public const IGNORED_QUERY = [
+        'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term',
+        'gclid', 'fbclid', 'ref',
+    ];
+
+    /**
+     * Was this link actually issued by us, and is it still fresh?
+     *
+     * ── WHY THIS LIVES HERE AND NOT IN THE CONTROLLERS ──────────────────
+     *
+     * This class already creates the links. Having it verify them too is
+     * the only arrangement where the list of ignored parameters cannot
+     * drift away from the list used to sign — and the cost of that drift
+     * is every link failing verification at once.
+     *
+     * ── AND WHY IT IS URL:: AND NOT $request-> ──────────────────────────
+     *
+     * Both controllers used to call `$request->hasValidSignature(ignoreQuery: …)`.
+     * That reads perfectly and does not exist: hasValidSignature on the
+     * request is a MACRO taking only $absolute, so PHP resolved the named
+     * argument against Macroable::__call and threw
+     *
+     *   Error: Unknown named parameter $ignoreQuery
+     *
+     * — a 500 on every single download and every pack, for anyone, every
+     * time. The method that takes ignoreQuery is the one on the URL
+     * generator, which is what this calls.
+     *
+     * It shipped because the suite was never run whole; DownloadQuotaTest
+     * had been failing on exactly this the entire time.
+     */
+    public static function signatureIsValid(Request $request): bool
+    {
+        return URL::hasValidSignature($request, absolute: true, ignoreQuery: self::IGNORED_QUERY);
+    }
 }
