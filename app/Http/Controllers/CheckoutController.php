@@ -90,6 +90,33 @@ class CheckoutController extends Controller
         }
 
         /*
+         * ── ALREADY PAYING FOR A DIFFERENT RECURRING PLAN ───────────────
+         *
+         * This guard used to compare only the SAME plan, and that left a
+         * hole wide enough to charge somebody twice: a subscriber on Pro
+         * Yearly was offered "Subscribe to Pro", and taking it would have
+         * created a SECOND subscription at PayPal without cancelling the
+         * first. $89 a year and $14 a month, at the same time, from one
+         * button on the account page.
+         *
+         * PayPal has a proper answer for this — /revise moves an existing
+         * subscription to another plan and prorates it — and until that is
+         * built, refusing is the only honest option. Cancelling here on
+         * their behalf would be worse: it decides for somebody that they
+         * want to lose their current plan, before they have agreed to the
+         * new one.
+         *
+         * So: refuse, and name the way through. The Cancel button on the
+         * account page is what makes that sentence true rather than a
+         * brush-off — the paid period is kept either way.
+         */
+        $current = $user->activeSubscription();
+
+        if ($current && $current->plan?->isRecurring()) {
+            return $back('You are on '.$current->plan->name.'. Cancel it first and you can subscribe to '.$plan->name.' — you keep the days you have already paid for.');
+        }
+
+        /*
          * ── CAN PAYPAL EVER GET BACK HERE? ──────────────────────────────
          *
          * This check exists because its absence produced the single most

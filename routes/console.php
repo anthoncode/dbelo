@@ -1,5 +1,6 @@
 <?php
 
+use App\Console\Commands\FetchPayPalChargesCommand;
 use App\Console\Commands\FetchPayPalEventsCommand;
 use App\Console\Commands\RollupStatsCommand;
 use App\Console\Commands\RunBackupCommand;
@@ -87,6 +88,28 @@ Schedule::job(new QueueHeartbeat)->everyFiveMinutes();
 */
 Schedule::command(FetchPayPalEventsCommand::class)
     ->everyTenMinutes()
+    ->withoutOverlapping();
+
+/*
+| Reconciling charges against PayPal's own ledger.
+|
+| Different question from the one above. fetch-events asks "did an event
+| get lost on the way here?"; this asks "did a charge happen that produced
+| no event at all?" — which is not hypothetical: the first real
+| subscription charge produced none, because PAYMENT.SALE.COMPLETED was not
+| ticked on the webhook at the time, so PayPal never generated it. Nothing
+| was lost; the event does not exist, and no amount of collecting finds it.
+|
+| A payment system that can only be checked by the same path that writes it
+| cannot be checked at all. This is the independent read.
+|
+| Nightly over a short window, because it is an audit and not a mechanism:
+| the money is already recorded by then in every ordinary case, and a week
+| of overlap is plenty to catch a day the other two paths both missed. It
+| only ADDS missing rows and never touches existing ones.
+*/
+Schedule::command(FetchPayPalChargesCommand::class, ['--days' => 7])
+    ->dailyAt('04:10')
     ->withoutOverlapping();
 
 /*

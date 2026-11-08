@@ -8,6 +8,9 @@
     /** Is this visitor already on a plan that bills again? */
     'onRecurring' => false,
 
+    /** The name of that plan, so the refusal can say which one. */
+    'currentPlanName' => null,
+
     /** Full-width (pricing card) or sized to its text (inline row). */
     'block' => false,
 
@@ -47,11 +50,14 @@
 
       1. already on it         → a badge, not a button
       2. a guest               → sign up first; there is nobody to bill yet
-      3. free, viewer is paid  → not a downgrade button, because cancelling
-                                 does not exist yet
-      4. recurring, no PayPal  → honestly disabled
-      5. recurring, ready      → POST, start a subscription
-      6. bought once           → POST, start an order
+      3. free, viewer is paid  → not a downgrade button; cancelling is on
+                                 the account page, and this is a plan list
+      4. pass, viewer is paid  → already included in what they have
+      5. recurring, already    → would be a SECOND subscription. Refused,
+         paying for another       and told how to switch
+      6. recurring, no PayPal  → honestly disabled
+      7. recurring, ready      → POST, start a subscription
+      8. bought once           → POST, start an order
 
     What is NOT here is a Cancel button. PayPal keeps billing a subscription
     until it is cancelled at PayPal, so a button that marked it cancelled
@@ -119,6 +125,24 @@
     <div class="{{ $quiet }}">
         <x-icon name="circle-check" style="solid" class="text-[0.78rem]" />
         {{ __('Included in your plan') }}
+    </div>
+
+@elseif (! $plan->isOneOff() && $onRecurring)
+    {{-- ── ALREADY PAYING FOR A DIFFERENT PLAN ───────────────────────
+         Taking this would create a SECOND subscription at PayPal without
+         ending the first — $89 a year and $14 a month at once, from one
+         button. PayPal's /revise exists for switching and is not built
+         yet; until it is, refusing is the only honest answer.
+
+         Cancelling on their behalf would be worse: it decides that
+         somebody wants to lose their current plan before they have agreed
+         to the new one. So this names the way through instead, and the
+         Cancel button on the account page is what makes that sentence
+         true rather than a brush-off. --}}
+    <div class="{{ $quiet }}">
+        {{ $currentPlanName
+            ? __('Cancel :plan first', ['plan' => $currentPlanName])
+            : __('Cancel your current plan first') }}
     </div>
 
 @elseif (! $plan->isOneOff() && ! $plan->isSyncedWithPayPal())

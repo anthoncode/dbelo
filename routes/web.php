@@ -270,6 +270,18 @@ Route::get('pass/cancel', [\App\Http\Controllers\PassCheckoutController::class, 
     ->middleware('auth')
     ->name('pass.cancel');
 
+/*
+| Ending a subscription.
+|
+| POST, because it changes something at PayPal and cannot be a link that a
+| prefetcher or a crawler might follow. No 'verified.setting': somebody who
+| wants to stop paying must never be blocked by an unrelated verification
+| notice — that is the one direction in which friction looks like a trap.
+*/
+Route::post('subscription/cancel', [\App\Http\Controllers\SubscriptionController::class, 'cancel'])
+    ->middleware('auth')
+    ->name('subscription.cancel');
+
 Route::livewire('upload', 'pages::upload')
     ->middleware(['auth', 'verified.setting'])
     ->name('upload');

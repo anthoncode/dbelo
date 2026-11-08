@@ -259,6 +259,37 @@ new #[Layout('layouts.site')] #[Title('Your plan')] class extends Component
                     </p>
                 </div>
             </div>
+        @elseif (session('cancel_done'))
+            {{-- Said as what it IS, not as a goodbye. The person has not
+                 lost anything yet and will not until the date below — a
+                 message that read like an ending would be wrong, and would
+                 make them think they had paid for nothing. --}}
+            <div class="flex items-start gap-3 rounded-card bg-info/10 p-5">
+                <span class="mt-0.5 grid size-8 shrink-0 place-items-center rounded-[11px] bg-info text-white">
+                    <x-icon name="circle-check" style="solid" class="text-xs" />
+                </span>
+                <div>
+                    <div class="text-[0.95rem] font-medium">{{ __('The renewal is stopped.') }}</div>
+                    <p class="mt-1 text-[0.86rem] leading-relaxed text-ink/60 dark:text-paper/60">
+                        {{ __('PayPal will not charge you again. Everything you have paid for keeps working until it runs out — the date is below.') }}
+                    </p>
+                </div>
+            </div>
+        @elseif (session('cancel_error'))
+            <div class="flex items-start gap-3 rounded-card bg-warning/10 p-5">
+                <span class="mt-0.5 grid size-8 shrink-0 place-items-center rounded-[11px] bg-warning text-ink">
+                    <x-icon name="triangle-exclamation" style="solid" class="text-xs" />
+                </span>
+                <div>
+                    <div class="text-[0.95rem] font-medium">{{ session('cancel_error') }}</div>
+                    <p class="mt-1 text-[0.86rem] leading-relaxed text-ink/60 dark:text-paper/60">
+                        {{-- The important half. A failed cancellation that
+                             left something half-done would be far worse
+                             than one that did nothing. --}}
+                        {{ __('Your plan has not changed.') }}
+                    </p>
+                </div>
+            </div>
         @elseif (session('checkout_error'))
             <div class="flex items-start gap-3 rounded-card bg-warning/10 p-5">
                 <span class="mt-0.5 grid size-8 shrink-0 place-items-center rounded-[11px] bg-warning text-ink">
@@ -383,10 +414,11 @@ new #[Layout('layouts.site')] #[Title('Your plan')] class extends Component
              account at all.
 
              Every control below is <x-plan-choice>, shared with the home
-             page. It owns all six states, including the two that are easy
-             to forget on a settings screen: a pass is not for sale to
-             somebody already on Pro, and Free is not a downgrade button
-             while cancelling does not exist.
+             page. It owns every state, including the ones easy to forget
+             on a settings screen: a pass is not for sale to somebody on
+             Pro, Free is not a downgrade button, and a second recurring
+             plan is refused outright — taking it would have created a
+             SECOND subscription at PayPal and charged for both.
              ══════════════════════════════════════════════════════════════ --}}
         @if ($this->choices->isNotEmpty())
             <div class="rounded-card bg-surface p-6 shadow-soft-md dark:bg-surface-dark">
@@ -430,6 +462,7 @@ new #[Layout('layouts.site')] #[Title('Your plan')] class extends Component
                                     :plan="$choice"
                                     :current-plan-id="$this->plan?->id"
                                     :on-recurring="$this->onRecurringPlan"
+                                    :current-plan-name="$this->plan?->name"
                                     block
                                     :tone="$choice->isOneOff() ? 'action' : 'muted'" />
                             </div>
@@ -541,11 +574,71 @@ new #[Layout('layouts.site')] #[Title('Your plan')] class extends Component
 
         {{-- The honest note about cancelling, in place of a button that
              cannot yet do what it says. --}}
-        @if ($this->state === 'active' && $this->plan && ! $this->plan->isFree())
-            <p class="text-[0.85rem] leading-relaxed text-ink/45 dark:text-paper/45">
-                {{ __('To stop the renewal, write to us at') }}
-                <a href="mailto:{{ config('dbelo.legal.support_email') }}" class="text-brand underline underline-offset-2">{{ config('dbelo.legal.support_email') }}</a>{{ __(' and we will take care of it. Cancelling from this page is coming.') }}
-            </p>
+        {{-- ══════════════════════════════════════════════════════════════
+             CANCELLING
+
+             This used to be a sentence asking people to send an email, and
+             that was the honest thing to show while there was no way to
+             cancel at PayPal: a button that marked a subscription cancelled
+             only on this side would be the worst outcome available — the
+             customer believes they are done, PayPal keeps charging, and
+             nobody notices for a month.
+
+             What changed is not PayPal's API. It is that there is now a
+             client that can call it and a handler that already knows what
+             a cancellation means here.
+
+             Only for a RECURRING plan: a pass has nothing to cancel, it
+             simply runs out. And only while it has not been cancelled
+             already — the block above says so in that case.
+             ══════════════════════════════════════════════════════════════ --}}
+        @if ($this->subscription && $this->plan?->isRecurring() && ! $this->subscription->cancelled_at)
+            <div x-data="{ confirming: false }" class="rounded-card border border-hairline p-5">
+                <div x-show="! confirming">
+                    <p class="text-[0.85rem] leading-relaxed text-ink/50 dark:text-paper/50">
+                        {{ __('You can stop the renewal whenever you like. You keep :plan until the period you have already paid for runs out.', ['plan' => $this->plan->name]) }}
+                    </p>
+
+                    <button type="button" x-on:click="confirming = true"
+                            class="mt-3 text-[0.85rem] text-ink/45 underline underline-offset-2 transition hover:text-danger dark:text-paper/45">
+                        {{ __('Cancel my plan') }}
+                    </button>
+                </div>
+
+                {{-- x-cloak so this never flashes open before Alpine runs. --}}
+                <div x-show="confirming" x-cloak>
+                    <div class="text-[0.95rem] font-medium">{{ __('Stop the renewal?') }}</div>
+
+                    <p class="mt-1.5 max-w-[60ch] text-[0.85rem] leading-relaxed text-ink/55 dark:text-paper/55">
+                        {{-- The date, not a vague reassurance. It is the one
+                             fact somebody needs to decide, and it is already
+                             on this page above. --}}
+                        @if ($this->subscription->ends_at)
+                            {{ __('PayPal will not charge you again. :plan keeps working until :date.', [
+                                'plan' => $this->plan->name,
+                                'date' => $this->subscription->ends_at->isoFormat('D MMMM YYYY'),
+                            ]) }}
+                        @else
+                            {{ __('PayPal will not charge you again. :plan keeps working until the period you have already paid for runs out.', ['plan' => $this->plan->name]) }}
+                        @endif
+                    </p>
+
+                    <div class="mt-4 flex flex-wrap items-center gap-3">
+                        <form method="POST" action="{{ route('subscription.cancel') }}">
+                            @csrf
+                            <button type="submit"
+                                    class="rounded-full bg-danger px-5 py-2.5 text-[0.85rem] font-medium text-white transition duration-300 ease-dbelo hover:-translate-y-0.5 hover:brightness-110">
+                                {{ __('Yes, stop the renewal') }}
+                            </button>
+                        </form>
+
+                        <button type="button" x-on:click="confirming = false"
+                                class="text-[0.85rem] text-ink/50 underline underline-offset-2 dark:text-paper/50">
+                            {{ __('Keep my plan') }}
+                        </button>
+                    </div>
+                </div>
+            </div>
         @endif
     </div>
 </x-pages::settings.layout>

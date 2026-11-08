@@ -184,6 +184,33 @@ class SubscriptionEvents
             return;
         }
 
+        $this->applyCancellation($subscription, $resource);
+
+        $event->markHandled($subscription->external_id);
+    }
+
+    /**
+     * Write down that a subscription will not renew.
+     *
+     * ── PUBLIC, AND CALLED FROM TWO PLACES ──────────────────────────────
+     *
+     * The webhook calls it, and so does the Cancel button on the account
+     * screen — which cancels at PayPal with our own credentials and then
+     * has to record the same thing. Exactly the shape of activate() above,
+     * and for the same reason: two code paths that both end a subscription
+     * must not be able to disagree about what ending one means.
+     *
+     * It matters more here than almost anywhere, because the rule being
+     * applied is the one that protects the customer: somebody who cancels
+     * on the 3rd has paid until the 30th, and a second implementation that
+     * forgot that would quietly take four weeks away from them.
+     *
+     * THE CALLER MUST HAVE VERIFIED THE RESOURCE. The webhook does it with
+     * the signature; the button does it by reading the subscription back
+     * from PayPal over an authenticated connection.
+     */
+    public function applyCancellation(Subscription $subscription, array $resource): void
+    {
         $until = $this->time($resource['billing_info']['next_billing_time'] ?? null);
 
         $subscription->forceFill([
@@ -196,13 +223,22 @@ class SubscriptionEvents
         ])->save();
 
         if (! $until) {
+            /*
+             * No next_billing_time means PayPal gave us nothing to measure
+             * the remaining paid period from. ends_at stays null, which
+             * isActive() reads as "no end" — so the person KEEPS access
+             * rather than losing it to a missing field.
+             *
+             * That is the safe direction and it is deliberate: the cost of
+             * being wrong here is somebody getting a few extra days, not
+             * somebody losing days they paid for. It is logged because it
+             * needs a human eventually, not because it is urgent.
+             */
             Log::warning('PayPal cancellation had no next_billing_time; subscription left open', [
                 'subscription' => $subscription->id,
                 'external_id' => $subscription->external_id,
             ]);
         }
-
-        $event->markHandled($subscription->external_id);
     }
 
     /**
