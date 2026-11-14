@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
@@ -42,6 +43,51 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        /*
+         * ── EVERY ABSOLUTE URL THIS APPLICATION WRITES NAMES APP_URL ────
+         *
+         * url() and route() build from THE HOST OF THE CURRENT REQUEST,
+         * not from APP_URL. That is Laravel working as designed, and on a
+         * server with one site it never matters. This account hosts two.
+         *
+         * gooova.com is the primary domain here and dbelo.com is an addon
+         * domain, so cPanel created www.dbelo.com.gooova.com pointing at
+         * the same document root. The application then argued Google into
+         * believing that address: sitemap.xml listed the entire catalogue
+         * under whichever host asked for it, and every page's
+         * rel=canonical named that same host. Three surfaces, one cause.
+         *
+         * Forcing the root here fixes all of them at once, and the ones
+         * nobody has thought of yet: password-reset links, the RSS feed,
+         * og:url, e-mail, and the PayPal return_url -- which is the same
+         * property of route() that once left buyers on a hung PayPal
+         * screen. That is the third time this single fact has cost a day.
+         *
+         * ── THE OTHER HALF IS IN public/.htaccess, AND THE ORDER OF THE
+         *    TWO IS LOAD-BEARING ──────────────────────────────────────
+         *
+         * A signed download link is verified against the URL AS THE
+         * REQUEST SPELLED IT, because validation reads the Request and
+         * not this generator. So on any host other than dbelo.com the
+         * links a page prints would be signed for dbelo.com and refused
+         * on arrival. The 301 in public/.htaccess is what guarantees no
+         * page is ever served on another host, which is what makes this
+         * line safe. Remove the redirect and this becomes a bug.
+         *
+         * Local development is untouched: APP_URL is per-environment and
+         * reads dbelo.test on the Mac. A tunnel (herd share) needs
+         * APP_URL pointed at the tunnel while it runs -- already true of
+         * the PayPal return URL long before this line existed.
+         *
+         * Guarded rather than assumed: an empty APP_URL would otherwise
+         * rewrite every link on the site to nothing, and a site whose
+         * links all point at "/" is harder to diagnose than a site that
+         * simply kept Laravel's default behaviour.
+         */
+        if (is_string($root = config('app.url')) && $root !== '') {
+            URL::forceRootUrl($root);
+        }
+
         /*
          * The access log.
          *

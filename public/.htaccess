@@ -5,6 +5,39 @@
 
     RewriteEngine On
 
+    # ── ONE HOST, AND THIS IS THE ONLY PLACE THAT ENFORCES IT ─────────
+    #
+    # This cPanel account's PRIMARY domain is gooova.com; dbelo.com is an
+    # addon domain. cPanel always creates a subdomain of the primary for
+    # an addon domain, pointing at the SAME document root -- here
+    # www.dbelo.com.gooova.com. Nobody asked for it and nothing announced
+    # it, so the whole site was reachable twice.
+    #
+    # Google found the second address, and the application confirmed it:
+    # sitemap.xml built every <loc> with route(), and every page's
+    # rel=canonical came from url()->current(). Both build from the host
+    # of the REQUEST, so the site handed Google a complete, self-
+    # consistent map of itself living at a hostname that is not its own.
+    # Searching "dbelo" returned the gooova subdomain, not dbelo.com.
+    #
+    # WHY THIS CANNOT HURT gooova.com: an .htaccess only runs for requests
+    # Apache routed to ITS document root. gooova.com has a different
+    # document root and its own file. This rule is only ever reached by a
+    # request that was already being served the dbelo application.
+    #
+    # It also folds www.dbelo.com into dbelo.com, which is the same
+    # duplicate-content problem with a more familiar name.
+    #
+    # THE .well-known EXCEPTION IS NOT OPTIONAL. AutoSSL renews a
+    # certificate by fetching http://<host>/.well-known/acme-challenge/...
+    # and reading what comes back. Redirecting that away makes validation
+    # fail for every hostname on this account that is not dbelo.com, and a
+    # shared certificate that stops renewing takes the working names down
+    # with it. Excluding the path costs nothing and removes the risk.
+    RewriteCond %{REQUEST_URI} !^/\.well-known/
+    RewriteCond %{HTTP_HOST} !^dbelo\.com$ [NC]
+    RewriteRule ^ https://dbelo.com%{REQUEST_URI} [L,R=301]
+
     # Handle Authorization Header
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
